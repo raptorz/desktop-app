@@ -2,6 +2,7 @@ package api
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/go-resty/resty/v2"
 	"github.com/sirupsen/logrus"
@@ -17,7 +18,7 @@ type Client struct {
 
 func NewClient() *Client {
 	return &Client{
-		client:  resty.New().SetTimeout(60000),
+		client:  resty.New().SetTimeout(60 * time.Second),
 		version: "linux_amd64_2.0",
 	}
 }

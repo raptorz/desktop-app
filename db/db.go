@@ -62,6 +62,9 @@ func NewInMemory() (*Database, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Each :memory: connection gets its own database, so the pool must be
+	// capped at one connection or migrations and queries see different DBs.
+	db.SetMaxOpenConns(1)
 
 	database := &Database{
 		db: db,
@@ -79,18 +82,92 @@ func (d *Database) Close() error {
 	return d.db.Close()
 }
 
+const dbSchemaVersion = 2
+
 func (d *Database) migrate() error {
 	migrationSQL, err := migrationsFS.ReadFile("migrations.sql")
 	if err != nil {
 		return fmt.Errorf("failed to read migration file: %w", err)
 	}
 
-	_, err = d.db.Exec(string(migrationSQL))
-	if err != nil {
+	if _, err = d.db.Exec(string(migrationSQL)); err != nil {
 		return fmt.Errorf("failed to execute migration: %w", err)
 	}
 
+	var version int
+	if err := d.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
+		return err
+	}
+	if version < 1 {
+		version = 1
+	}
+
+	steps := map[int]func(tx *sql.Tx) error{
+		2: func(tx *sql.Tx) error {
+			for _, col := range []struct{ name, ddl string }{
+				{"staging_snapshot_id", "TEXT DEFAULT ''"},
+				{"staging_token", "TEXT DEFAULT ''"},
+				{"staging_total", "INTEGER DEFAULT 0"},
+				{"next_probe_at", "INTEGER DEFAULT 0"},
+				{"pending_generation", "INTEGER DEFAULT 0"},
+			} {
+				if err := d.ensureColumn(tx, "shared_sync_state", col.name, col.ddl); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	}
+
+	for v := version + 1; v <= dbSchemaVersion; v++ {
+		tx, err := d.db.Begin()
+		if err != nil {
+			return err
+		}
+		if step, ok := steps[v]; ok {
+			if err := step(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration step %d failed: %w", v, err)
+			}
+		}
+		if _, err := tx.Exec(fmt.Sprintf("PRAGMA user_version = %d", v)); err != nil {
+			tx.Rollback()
+			return err
+		}
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+		logrus.Infof("Database schema migrated to version %d", v)
+	}
+
 	logrus.Info("Database migration completed")
+	return nil
+}
+
+func (d *Database) ensureColumn(tx *sql.Tx, table, column, ddl string) error {
+	rows, err := tx.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notNull, pk int
+		var dfltValue any
+		if err := rows.Scan(&cid, &name, &ctype, &notNull, &dfltValue, &pk); err != nil {
+			return err
+		}
+		if name == column {
+			return nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, ddl)); err != nil {
+		return err
+	}
 	return nil
 }
 

@@ -104,6 +104,30 @@ func TestGuestBootstrapAndNotLogin(t *testing.T) {
 	}
 }
 
+func TestSharedBatchWritesAreRejected(t *testing.T) {
+	e := newTestEnv(t)
+	userID, notebookID := e.login(t)
+	user, _ := e.db.GetUser(userID)
+	user.Host = "https://notes.example"
+	user.Token = "token"
+	if err := e.db.UpdateUser(user); err != nil {
+		t.Fatal(err)
+	}
+	accountID := db.SharedAccountID(user.Host, userID)
+	sharedNoteID := utils.ObjectId()
+	if err := e.db.PublishSharedSnapshot(accountID, []models.SharedSnapshotItem{{Kind: "note", Note: &models.SharedNote{
+		NoteID: sharedNoteID, OwnerUserID: utils.ObjectId(), TargetContentVersion: "v1",
+	}}}, 1); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"/note/moveNote", "/note/copyNote", "/note/deleteNote"} {
+		_, body := e.post(t, path, url.Values{"noteIds[0]": {sharedNoteID}, "notebookId": {notebookID}})
+		if !strings.Contains(string(body), "sharedReadOnly") {
+			t.Fatalf("%s accepted shared write: %s", path, body)
+		}
+	}
+}
+
 func TestNoteLifecycleRoundtrip(t *testing.T) {
 	e := newTestEnv(t)
 	userID, notebookID := e.login(t)

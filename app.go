@@ -17,6 +17,7 @@ import (
 	"pearlnote/db"
 	"pearlnote/models"
 	"pearlnote/service"
+	"pearlnote/sharedsync"
 	"pearlnote/sync"
 	"pearlnote/utils"
 )
@@ -26,15 +27,22 @@ type App struct {
 	db          *db.Database
 	api         *api.Client
 	sync        *sync.SyncService
+	sharedSync  *sharedsync.Service
 	files       *service.FileService
 	webCallback WebCallbackFunc
 }
 
 func NewApp(database *db.Database) *App {
+	files := service.NewFileService(database)
+	client := api.NewClient()
 	return &App{
-		db:    database,
-		api:   api.NewClient(),
-		files: service.NewFileService(database),
+		db:   database,
+		api:  client,
+		sync: sync.NewSyncService(database, client),
+		// Shared synchronization changes its API authentication context while it
+		// runs, so it must not share a mutable client with personal sync.
+		sharedSync: sharedsync.New(database, api.NewClient(), files),
+		files:      files,
 	}
 }
 
@@ -1427,6 +1435,12 @@ func (a *App) UpdateAllBeLocal(email, pwd, host string) map[string]interface{} {
 
 // 5. deleteUserAndAllData - 完整删除用户及其所有数据
 func (a *App) DeleteUserAndAllData(userID string) map[string]interface{} {
+	if user, _ := a.db.GetUser(userID); user != nil && user.Host != "" {
+		accountID := db.SharedAccountID(user.Host, user.ID)
+		a.db.DeleteSharedAccountRows(accountID)
+		os.RemoveAll(filepath.Join(a.files.GetDataDir(), "shared", accountID))
+	}
+
 	a.files.DeleteUserDir(userID)
 
 	a.db.DeleteAllNotes(userID)

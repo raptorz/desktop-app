@@ -14,11 +14,13 @@ import (
 const pageSize = 100
 
 type Handler struct {
-	DB      *db.Database
-	Files   *service.FileService
-	Proxy   *ServerProxy
-	Version string
-	Dist    fs.FS
+	DB               *db.Database
+	Files            *service.FileService
+	Proxy            *ServerProxy
+	Version          string
+	Dist             fs.FS
+	OnLogin          func()
+	OnSharedDownload func()
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -52,6 +54,9 @@ func isGetApiPath(path string) bool {
 
 func (h *Handler) route(w http.ResponseWriter, r *http.Request) bool {
 	path, method := r.URL.Path, r.Method
+	if h.rejectSharedWrite(w, r, path) {
+		return true
+	}
 
 	switch {
 	case path == "/web/bootstrap" && method == http.MethodGet:
@@ -60,6 +65,8 @@ func (h *Handler) route(w http.ResponseWriter, r *http.Request) bool {
 		h.notes(w, r)
 	case path == "/web/document":
 		h.document(w, r)
+	case path == "/share/listShareNotes":
+		h.sharedNotes(w, r)
 	case path == "/web/save":
 		h.save(w, r)
 	case path == "/web/restore":
@@ -86,6 +93,8 @@ func (h *Handler) route(w http.ResponseWriter, r *http.Request) bool {
 		h.uploadAttach(w, r)
 	case path == "/attach/deleteAttach":
 		h.deleteAttach(w, r)
+	case path == "/attach/queueSharedDownload":
+		h.queueSharedDownload(w, r)
 	case path == "/attach/download" && method == http.MethodGet:
 		h.downloadAttach(w, r)
 	case path == "/file/pasteImage":

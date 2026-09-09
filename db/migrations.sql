@@ -177,3 +177,106 @@ CREATE TABLE IF NOT EXISTS config (
     key TEXT PRIMARY KEY,
     value TEXT
 );
+
+-- Shared data is deliberately isolated from notebooks/notes and their dirty
+-- queues. account_id namespaces a remote server + user pair.
+CREATE TABLE IF NOT EXISTS shared_accounts (
+    account_id TEXT PRIMARY KEY,
+    server_url TEXT NOT NULL,
+    remote_user_id TEXT NOT NULL,
+    protocol_version INTEGER DEFAULT 0,
+    capability_state TEXT DEFAULT 'unknown',
+    UNIQUE(server_url, remote_user_id)
+);
+
+CREATE TABLE IF NOT EXISTS shared_notebooks (
+    account_id TEXT NOT NULL,
+    server_notebook_id TEXT NOT NULL,
+    owner_user_id TEXT NOT NULL,
+    parent_notebook_id TEXT,
+    title TEXT NOT NULL,
+    seq INTEGER DEFAULT 0,
+    perm INTEGER DEFAULT 0,
+    generation INTEGER NOT NULL,
+    revoked INTEGER DEFAULT 0,
+    PRIMARY KEY(account_id, server_notebook_id)
+);
+
+CREATE TABLE IF NOT EXISTS shared_notes (
+    account_id TEXT NOT NULL,
+    server_note_id TEXT NOT NULL,
+    server_notebook_id TEXT,
+    owner_user_id TEXT NOT NULL,
+    title TEXT,
+    content TEXT,
+    description TEXT,
+    tags TEXT,
+    is_markdown INTEGER DEFAULT 0,
+    perm INTEGER DEFAULT 0,
+    metadata_version TEXT,
+    target_content_version TEXT,
+    cached_content_version TEXT,
+    digest TEXT,
+    cache_state TEXT DEFAULT 'pending',
+    generation INTEGER NOT NULL,
+    revoked INTEGER DEFAULT 0,
+    created_time INTEGER,
+    updated_time INTEGER,
+    cached_at INTEGER,
+    PRIMARY KEY(account_id, server_note_id)
+);
+CREATE INDEX IF NOT EXISTS idx_shared_notes_list ON shared_notes(account_id, owner_user_id, server_notebook_id, revoked, updated_time);
+
+CREATE TABLE IF NOT EXISTS shared_sync_state (
+    account_id TEXT PRIMARY KEY,
+    generation INTEGER DEFAULT 0,
+    last_checked_at INTEGER,
+    last_completed_at INTEGER,
+    error TEXT,
+    staging_snapshot_id TEXT DEFAULT '',
+    staging_token TEXT DEFAULT '',
+    staging_total INTEGER DEFAULT 0,
+    next_probe_at INTEGER DEFAULT 0,
+    pending_generation INTEGER DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS shared_snapshot_items (
+    account_id TEXT NOT NULL,
+    snapshot_id TEXT NOT NULL,
+    item_key TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    PRIMARY KEY(account_id, snapshot_id, item_key)
+);
+
+CREATE TABLE IF NOT EXISTS shared_download_jobs (
+    account_id TEXT NOT NULL,
+    resource_type TEXT NOT NULL,
+    resource_id TEXT NOT NULL,
+    target_version TEXT NOT NULL,
+    status TEXT DEFAULT 'pending',
+    retries INTEGER DEFAULT 0,
+    next_retry_at INTEGER DEFAULT 0,
+    error TEXT,
+    PRIMARY KEY(account_id, resource_type, resource_id, target_version)
+);
+
+CREATE TABLE IF NOT EXISTS shared_files (
+    account_id TEXT NOT NULL,
+    server_note_id TEXT NOT NULL,
+    server_file_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    title TEXT,
+    size INTEGER DEFAULT 0,
+    target_version TEXT,
+    local_path TEXT,
+    cache_state TEXT DEFAULT 'pending',
+    retries INTEGER DEFAULT 0,
+    next_retry_at INTEGER DEFAULT 0,
+    error TEXT,
+    generation INTEGER NOT NULL,
+    revoked INTEGER DEFAULT 0,
+    cached_at INTEGER,
+    PRIMARY KEY(account_id, server_note_id, server_file_id, kind)
+);
+CREATE INDEX IF NOT EXISTS idx_shared_files_lookup ON shared_files(account_id, server_file_id, kind, revoked);

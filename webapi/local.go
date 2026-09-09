@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"pearlnote/db"
 	"pearlnote/models"
 	"pearlnote/utils"
 )
@@ -96,6 +97,13 @@ func (h *Handler) requireUser(w http.ResponseWriter) *models.User {
 	return user
 }
 
+func (h *Handler) sharedCacheState(user *models.User) string {
+	if user.Host == "" {
+		return ""
+	}
+	return h.DB.SharedCapabilityState(db.SharedAccountID(user.Host, user.ID))
+}
+
 func (h *Handler) userLogo(userID string) string {
 	logo, _ := h.DB.GetConfig("logo:" + userID)
 	return logo
@@ -127,8 +135,14 @@ func (h *Handler) bootstrap(w http.ResponseWriter) {
 
 	shared := map[string]any{}
 	isAdmin := false
+	if user.Token != "" && !user.IsLocal {
+		accountID := db.SharedAccountID(user.Host, user.ID)
+		if cached, cacheErr := h.DB.SharedNotebooks(accountID); cacheErr == nil {
+			shared = cached
+		}
+	}
 	if h.Proxy != nil {
-		shared, isAdmin = h.Proxy.SharedNotebooks(user)
+		_, isAdmin = h.Proxy.SharedNotebooks(user)
 	}
 
 	h.writeJSON(w, map[string]any{
@@ -139,6 +153,7 @@ func (h *Handler) bootstrap(w http.ResponseWriter) {
 		"SharedNotebooks": shared,
 		"Tags":            tags,
 		"Version":         h.Version,
+		"SharedCache":     h.sharedCacheState(user),
 	})
 }
 
@@ -190,7 +205,101 @@ func (h *Handler) document(w http.ResponseWriter, r *http.Request) {
 	if user == nil {
 		return
 	}
-	h.respondDocument(w, h.form(r, "noteId"), user.ID)
+	noteID := h.form(r, "noteId")
+	accountID := db.SharedAccountID(user.Host, user.ID)
+	if shared, err := h.DB.GetSharedNote(accountID, noteID); err == nil && shared != nil {
+		if shared.CacheState == "pending" || shared.Content == "" && shared.CachedContentVersion == "" {
+			h.fail(w, "sharedNotCached")
+			return
+		}
+		h.writeJSON(w, map[string]any{"Note": map[string]any{"NoteId": shared.NoteID, "NotebookId": shared.NotebookID, "UserId": shared.OwnerUserID, "OwnerUserId": shared.OwnerUserID, "Title": shared.Title, "Tags": shared.Tags, "Usn": 0, "IsMarkdown": shared.IsMarkdown, "IsTrash": false, "IsShared": true, "Perm": shared.Perm, "CachedAt": shared.CachedAt, "CacheState": shared.CacheState, "CreatedTime": timeOrNow(shared.CreatedTime), "UpdatedTime": timeOrNow(shared.UpdatedTime)}, "Content": normalizeContent(shared.Content), "Writable": false})
+		return
+	}
+	h.respondDocument(w, noteID, user.ID)
+}
+
+func (h *Handler) sharedNotes(w http.ResponseWriter, r *http.Request) {
+	user := h.requireUser(w)
+	if user == nil {
+		return
+	}
+	if user.Token == "" {
+		h.writeJSON(w, []any{})
+		return
+	}
+	accountID := db.SharedAccountID(user.Host, user.ID)
+	list, err := h.DB.ListSharedNotes(accountID, h.form(r, "userId"), h.form(r, "notebookId"), h.form(r, "key"))
+	if err != nil {
+		h.fail(w, err.Error())
+		return
+	}
+	sortField := h.form(r, "sortField")
+	sort.SliceStable(list, func(i, j int) bool {
+		switch sortField {
+		case "Title":
+			return strings.ToLower(list[i].Title) < strings.ToLower(list[j].Title)
+		case "CreatedTime":
+			return timeOrNow(list[i].CreatedTime).After(*timeOrNow(list[j].CreatedTime))
+		default:
+			return timeOrNow(list[i].UpdatedTime).After(*timeOrNow(list[j].UpdatedTime))
+		}
+	})
+	page, _ := strconv.Atoi(h.form(r, "page"))
+	if page < 1 {
+		page = 1
+	}
+	start := (page - 1) * pageSize
+	if start > len(list) {
+		start = len(list)
+	}
+	end := start + pageSize
+	if end > len(list) {
+		end = len(list)
+	}
+	items := make([]map[string]any, 0, end-start)
+	for _, n := range list[start:end] {
+		items = append(items, map[string]any{"NoteId": n.NoteID, "NotebookId": n.NotebookID, "UserId": n.OwnerUserID, "Title": n.Title, "Desc": n.Desc, "Perm": n.Perm, "IsShared": true, "CacheState": n.CacheState, "CreatedTime": timeOrNow(n.CreatedTime), "UpdatedTime": timeOrNow(n.UpdatedTime)})
+	}
+	h.writeJSON(w, items)
+}
+
+func (h *Handler) rejectSharedWrite(w http.ResponseWriter, r *http.Request, path string) bool {
+	if r.Method == http.MethodGet {
+		return false
+	}
+	write := map[string]bool{"/web/save": true, "/web/restore": true, "/note/deleteNote": true, "/note/deleteTrash": true, "/note/moveNote": true, "/note/copyNote": true, "/attach/uploadAttach": true, "/attach/deleteAttach": true, "/file/pasteImage": true}
+	if !write[path] {
+		return false
+	}
+	user := h.activeUser()
+	if user == nil {
+		return false
+	}
+	accountID := db.SharedAccountID(user.Host, user.ID)
+	noteID := h.form(r, "noteId")
+	if noteID != "" && h.DB.IsSharedNote(accountID, noteID) {
+		h.fail(w, "sharedReadOnly")
+		return true
+	}
+	for _, id := range formList(r, "noteIds") {
+		if h.DB.IsSharedNote(accountID, id) {
+			h.fail(w, "sharedReadOnly")
+			return true
+		}
+	}
+	if path == "/web/save" && h.form(r, "ownerId") != "" && h.form(r, "ownerId") != user.ID {
+		h.fail(w, "sharedReadOnly")
+		return true
+	}
+	if notebookID := h.form(r, "notebookId"); notebookID != "" && h.DB.IsSharedNotebook(accountID, notebookID) {
+		h.fail(w, "sharedReadOnly")
+		return true
+	}
+	if path == "/attach/deleteAttach" && h.DB.IsSharedFile(accountID, h.form(r, "attachId")) {
+		h.fail(w, "sharedReadOnly")
+		return true
+	}
+	return false
 }
 
 func (h *Handler) sortedNotes(user *models.User, notebookID, key, tag, sortField string, trash bool) ([]*models.Note, error) {
@@ -508,6 +617,13 @@ func (h *Handler) listHistories(w http.ResponseWriter, r *http.Request) {
 	if user == nil {
 		return
 	}
+	if user.Host != "" {
+		accountID := db.SharedAccountID(user.Host, user.ID)
+		if h.DB.IsSharedNote(accountID, h.form(r, "noteId")) {
+			h.fail(w, "sharedHistoryUnsupported")
+			return
+		}
+	}
 	histories, err := h.DB.GetNoteHistories(h.form(r, "noteId"))
 	if err != nil {
 		histories = nil
@@ -543,6 +659,25 @@ func (h *Handler) getAttachs(w http.ResponseWriter, r *http.Request) {
 	user := h.requireUser(w)
 	if user == nil {
 		return
+	}
+	if user.Host != "" {
+		accountID := db.SharedAccountID(user.Host, user.ID)
+		if h.DB.IsSharedNote(accountID, h.form(r, "noteId")) {
+			files, err := h.DB.ListSharedAttachmentsForNote(accountID, h.form(r, "noteId"))
+			if err != nil {
+				h.fail(w, err.Error())
+				return
+			}
+			list := []map[string]any{}
+			for _, f := range files {
+				list = append(list, map[string]any{
+					"AttachId": f.FileID, "Title": f.Title, "Name": f.Title, "Type": f.Kind,
+					"Size": f.Size, "CacheState": f.CacheState, "CachedAt": timeOrNow(f.CachedAt),
+				})
+			}
+			h.writeJSON(w, map[string]any{"Ok": true, "List": list})
+			return
+		}
 	}
 	attachs, err := h.Files.GetAttachsByNote(h.form(r, "noteId"))
 	if err != nil {
@@ -671,8 +806,19 @@ func (h *Handler) downloadAttach(w http.ResponseWriter, r *http.Request) {
 	if user == nil {
 		return
 	}
-	path, title, err := h.Files.GetAttach(h.form(r, "attachId"))
-	if err != nil {
+	var path, title string
+	attachID := h.form(r, "attachId")
+	if user.Host != "" {
+		accountID := db.SharedAccountID(user.Host, user.ID)
+		if h.DB.IsSharedFile(accountID, attachID) {
+			path, title, _, _ = h.DB.GetSharedFilePath(accountID, attachID, "attachment")
+		} else {
+			path, title, _ = h.Files.GetAttach(attachID)
+		}
+	} else {
+		path, title, _ = h.Files.GetAttach(attachID)
+	}
+	if path == "" {
 		http.NotFound(w, r)
 		return
 	}
@@ -709,8 +855,19 @@ func (h *Handler) serveImage(w http.ResponseWriter, r *http.Request) {
 	if user == nil {
 		return
 	}
-	path, err := h.Files.GetImage(h.form(r, "fileId"))
-	if err != nil {
+	var path string
+	fileID := h.form(r, "fileId")
+	if user.Host != "" {
+		accountID := db.SharedAccountID(user.Host, user.ID)
+		if h.DB.IsSharedFile(accountID, fileID) {
+			path, _, _, _ = h.DB.GetSharedFilePath(accountID, fileID, "image")
+		} else {
+			path, _ = h.Files.GetImage(fileID)
+		}
+	} else {
+		path, _ = h.Files.GetImage(fileID)
+	}
+	if path == "" {
 		http.NotFound(w, r)
 		return
 	}
@@ -736,6 +893,7 @@ func (h *Handler) doLogin(w http.ResponseWriter, r *http.Request) {
 		h.DB.SetCurrentUser(user.ID)
 		h.Files.InitUserDirs(user.ID)
 		h.DB.UpdateLastLoginTime(user.ID)
+		h.fireLoginHook()
 		h.writeJSON(w, map[string]any{"Ok": true})
 		return
 	}
@@ -743,6 +901,7 @@ func (h *Handler) doLogin(w http.ResponseWriter, r *http.Request) {
 	if h.Proxy != nil {
 		if ok, msg := h.Proxy.LoginServer(email, pwd); ok {
 			h.adoptServerUser(email, pwd)
+			h.fireLoginHook()
 			h.writeJSON(w, map[string]any{"Ok": true})
 			return
 		} else if msg != "offline" {
@@ -776,6 +935,12 @@ func (h *Handler) adoptServerUser(email, pwd string) {
 	h.DB.SetConfig("proxy:pwd", pwd)
 }
 
+func (h *Handler) fireLoginHook() {
+	if h.OnLogin != nil {
+		go h.OnLogin()
+	}
+}
+
 func (h *Handler) verifyLocalPassword(user *models.User, password string) string {
 	if user.Pwd == "" {
 		return ""
@@ -804,4 +969,29 @@ func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
 	h.DB.DeactivateAllUsers()
 	h.DB.SetCurrentUser("")
 	http.Redirect(w, r, "/login", http.StatusFound)
+}
+
+func (h *Handler) queueSharedDownload(w http.ResponseWriter, r *http.Request) {
+	user := h.requireUser(w)
+	if user == nil {
+		return
+	}
+	if user.Host == "" {
+		h.fail(w, "sharedCacheUnavailable")
+		return
+	}
+	accountID := db.SharedAccountID(user.Host, user.ID)
+	n, err := h.DB.QueueSharedAttachment(accountID, h.form(r, "attachId"))
+	if err != nil {
+		h.fail(w, err.Error())
+		return
+	}
+	if n == 0 {
+		h.fail(w, "notFound")
+		return
+	}
+	if h.OnSharedDownload != nil {
+		h.OnSharedDownload()
+	}
+	h.ok(w)
 }

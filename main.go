@@ -15,6 +15,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 	"github.com/wailsapp/wails/v2/pkg/options/linux"
 	"github.com/wailsapp/wails/v2/pkg/options/mac"
+	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"pearlnote/db"
 	"pearlnote/service"
@@ -90,6 +91,11 @@ func main() {
 	}
 
 	app := NewApp(database)
+	app.sharedSync.OnRevocation = func(noteIDs []string) {
+		if app.ctx != nil {
+			wailsruntime.EventsEmit(app.ctx, "shared-notes-revoked", noteIDs)
+		}
+	}
 	appMenu := buildMenu(app)
 
 	dist, err := fs.Sub(assets, "frontend/dist")
@@ -99,11 +105,13 @@ func main() {
 	}
 
 	apiHandler := &webapi.Handler{
-		DB:      database,
-		Files:   service.NewFileService(database),
-		Proxy:   webapi.NewServerProxy(database, app.files),
-		Version: AppVersion,
-		Dist:    dist,
+		DB:               database,
+		Files:            service.NewFileService(database),
+		Proxy:            webapi.NewServerProxy(database, app.files),
+		Version:          AppVersion,
+		Dist:             dist,
+		OnLogin:          func() { go app.sharedSync.SyncOnce() },
+		OnSharedDownload: func() { go app.sharedSync.DownloadPending() },
 	}
 
 	err = wails.Run(&options.App{
@@ -191,12 +199,22 @@ func (a *App) startAutoSync() {
 	go func() {
 		if user, _ := a.db.GetActiveUser(); user != nil && user.Token != "" {
 			a.IncrSync()
+			a.sharedSync.SyncOnce()
 		}
 		ticker := time.NewTicker(5 * time.Minute)
 		defer ticker.Stop()
-		for range ticker.C {
-			if user, _ := a.db.GetActiveUser(); user != nil && user.Token != "" && !a.IsSyncing() {
-				a.IncrSync()
+		sharedTicker := time.NewTicker(5 * time.Minute)
+		defer sharedTicker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				if user, _ := a.db.GetActiveUser(); user != nil && user.Token != "" && !a.IsSyncing() {
+					a.IncrSync()
+				}
+			case <-sharedTicker.C:
+				if user, _ := a.db.GetActiveUser(); user != nil && user.Token != "" {
+					a.sharedSync.SyncOnce()
+				}
 			}
 		}
 	}()
