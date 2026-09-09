@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
-	"leanote/models"
-	"leanote/utils"
+	"pearlnote/models"
+	"pearlnote/utils"
 
 	_ "modernc.org/sqlite"
 )

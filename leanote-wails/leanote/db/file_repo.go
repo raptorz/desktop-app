@@ -4,8 +4,8 @@ import (
 	"database/sql"
 	"time"
 
-	"leanote/models"
-	"leanote/utils"
+	"pearlnote/models"
+	"pearlnote/utils"
 )
 
 func (d *Database) InsertImage(img *models.Image) error {
@@ -426,8 +426,52 @@ func (d *Database) GetUser(userID string) (*models.User, error) {
 	return &user, nil
 }
 
+func (d *Database) GetUserByNameOrEmail(identifier string) (*models.User, error) {
+	row := d.db.QueryRow(`
+		SELECT _id, username, email, pwd, token, host,
+			last_sync_usn, last_sync_time, notebook_usn, note_usn, tag_usn,
+			is_active, is_local, has_db, state, created_time, last_login_time
+		FROM users WHERE username = ? OR email = ?
+	`, identifier, identifier)
+
+	var user models.User
+	var lastSyncTime, createdTime, lastLoginTime sql.NullInt64
+
+	err := row.Scan(
+		&user.ID, &user.Username, &user.Email, &user.Pwd, &user.Token, &user.Host,
+		&user.LastSyncUsn, &lastSyncTime, &user.NotebookUsn, &user.NoteUsn, &user.TagUsn,
+		&user.IsActive, &user.IsLocal, &user.HasDB, &user.State, &createdTime, &lastLoginTime,
+	)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	if lastSyncTime.Valid {
+		t := utils.UnixToTime(lastSyncTime.Int64)
+		user.LastSyncTime = &t
+	}
+	if createdTime.Valid {
+		t := utils.UnixToTime(createdTime.Int64)
+		user.CreatedTime = &t
+	}
+	if lastLoginTime.Valid {
+		t := utils.UnixToTime(lastLoginTime.Int64)
+		user.LastLoginTime = &t
+	}
+
+	return &user, nil
+}
+
 func (d *Database) DeleteUser(userID string) error {
 	_, err := d.db.Exec(`DELETE FROM users WHERE _id = ?`, userID)
+	return err
+}
+
+func (d *Database) DeactivateAllUsers() error {
+	_, err := d.db.Exec(`UPDATE users SET is_active = 0`)
 	return err
 }
 

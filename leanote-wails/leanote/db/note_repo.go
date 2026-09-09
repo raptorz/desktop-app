@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"time"
 
-	"leanote/models"
-	"leanote/utils"
+	"pearlnote/models"
+	"pearlnote/utils"
 )
 
 func (d *Database) InsertNote(note *models.Note) error {
@@ -143,6 +143,34 @@ func (d *Database) GetTrashNotes(userID string) ([]*models.Note, error) {
 	return d.scanNotes(rows)
 }
 
+func (d *Database) GetAllNotes(userID string) ([]*models.Note, error) {
+	rows, err := d.db.Query(`
+		SELECT _id, note_id, server_note_id, notebook_id, user_id,
+			title, content, desc, abstract, img_src, tags,
+			is_markdown, is_trash, is_blog, is_star, usn,
+			is_dirty, content_is_dirty, local_is_new, local_is_delete, init_sync,
+			conflict_note_id, conflict_time, conflict_fixed, err,
+			created_time, updated_time
+		FROM notes
+		WHERE user_id = ? AND is_trash = 0 AND (local_is_delete = 0 OR local_is_delete IS NULL)
+		ORDER BY updated_time DESC
+	`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	return d.scanNotes(rows)
+}
+
+func (d *Database) MarkNoteLocalDelete(noteID string) error {
+	_, err := d.db.Exec(`
+		UPDATE notes SET local_is_delete = 1, is_dirty = 1, is_trash = 1, updated_time = ?
+		WHERE note_id = ?
+	`, time.Now().Unix(), noteID)
+	return err
+}
+
 func (d *Database) GetStarNotes(userID string) ([]*models.Note, error) {
 	rows, err := d.db.Query(`
 		SELECT _id, note_id, server_note_id, notebook_id, user_id,
@@ -151,7 +179,7 @@ func (d *Database) GetStarNotes(userID string) ([]*models.Note, error) {
 			is_dirty, content_is_dirty, local_is_new, local_is_delete, init_sync,
 			conflict_note_id, conflict_time, conflict_fixed, err,
 			created_time, updated_time
-		FROM notes 
+		FROM notes
 		WHERE user_id = ? AND is_star = 1 AND is_trash = 0 AND (local_is_delete = 0 OR local_is_delete IS NULL)
 		ORDER BY updated_time DESC
 	`, userID)
@@ -298,6 +326,18 @@ func (d *Database) DeleteNoteForce(noteID string) error {
 
 func (d *Database) DeleteLocalNote(noteID string) error {
 	_, err := d.db.Exec(`DELETE FROM notes WHERE note_id = ?`, noteID)
+	return err
+}
+
+func (d *Database) SetNoteTrash(noteID string, isTrash bool) error {
+	val := 0
+	if isTrash {
+		val = 1
+	}
+	_, err := d.db.Exec(`
+		UPDATE notes SET is_trash = ?, is_dirty = 1, updated_time = ?
+		WHERE note_id = ?
+	`, val, time.Now().Unix(), noteID)
 	return err
 }
 

@@ -1,9 +1,9 @@
 {
   "$schema": "https://wails.io/schemas/config.v2.json",
-  "name": "leanote",
-  "outputfilename": "leanote",
+  "name": "pearlnote",
+  "outputfilename": "pearlnote",
   "frontend:install": "echo 'skip'",
-  "frontend:build": "echo 'skip'",
+  "frontend:build": "bash build-frontend.sh",
   "frontend:dev:watcher": "echo 'skip'",
   "frontend:dev:serverUrl": "auto",
   "build:tags": "webkit2_41",

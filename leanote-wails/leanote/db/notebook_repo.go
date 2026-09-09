@@ -4,8 +4,8 @@ import (
 	"database/sql"
 	"time"
 
-	"leanote/models"
-	"leanote/utils"
+	"pearlnote/models"
+	"pearlnote/utils"
 )
 
 func (d *Database) InsertNotebook(nb *models.Notebook) error {

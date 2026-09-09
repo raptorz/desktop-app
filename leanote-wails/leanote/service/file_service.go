@@ -12,9 +12,9 @@ import (
 	"strings"
 	"time"
 
-	"leanote/db"
-	"leanote/models"
-	"leanote/utils"
+	"pearlnote/db"
+	"pearlnote/models"
+	"pearlnote/utils"
 )
 
 type FileService struct {
@@ -26,19 +26,19 @@ func getLeanoteDataPath() string {
 	homeDir, _ := os.UserHomeDir()
 	switch runtime.GOOS {
 	case "darwin":
-		return filepath.Join(homeDir, "Library", "Application Support", "leanote")
+		return filepath.Join(homeDir, "Library", "Application Support", "pearlnote")
 	case "windows":
 		appData := os.Getenv("APPDATA")
 		if appData == "" {
 			appData = filepath.Join(homeDir, "AppData", "Roaming")
 		}
-		return filepath.Join(appData, "leanote")
+		return filepath.Join(appData, "pearlnote")
 	default:
 		configDir := os.Getenv("XDG_CONFIG_HOME")
 		if configDir == "" {
 			configDir = filepath.Join(homeDir, ".config")
 		}
-		return filepath.Join(configDir, "leanote")
+		return filepath.Join(configDir, "pearlnote")
 	}
 }
 
@@ -54,6 +54,11 @@ func NewFileService(database *db.Database) *FileService {
 
 func (fs *FileService) GetDataDir() string {
 	return fs.dataDir
+}
+
+func (fs *FileService) SetDataDir(dir string) {
+	fs.dataDir = dir
+	os.MkdirAll(dir, 0755)
 }
 
 func (fs *FileService) GetUserDir(userID string) string {

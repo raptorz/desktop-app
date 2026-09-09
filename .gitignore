@@ -25,3 +25,8 @@ node_modules/fs.extra
 /dev/node_modules
 
 node_modules
+
+# Wails build artifacts
+leanote-wails/leanote/leanote
+leanote-wails/leanote/frontend/dist/
+leanote-wails/leanote/build/bin/

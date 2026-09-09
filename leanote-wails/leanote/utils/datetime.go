@@ -72,7 +72,8 @@ func FixNoteContentForSend(content, serverURL, localURL string) string {
 	}
 
 	replacements := map[string]string{
-		localURL: serverURL + "/api/file/getImage",
+		localURL:                  serverURL + "/api/file/getImage",
+		"leanote://file/getImage": serverURL + "/api/file/getImage",
 	}
 
 	for old, new := range replacements {

@@ -13,12 +13,12 @@ import (
 	"github.com/signintech/gopdf"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
-	"leanote/api"
-	"leanote/db"
-	"leanote/models"
-	"leanote/service"
-	"leanote/sync"
-	"leanote/utils"
+	"pearlnote/api"
+	"pearlnote/db"
+	"pearlnote/models"
+	"pearlnote/service"
+	"pearlnote/sync"
+	"pearlnote/utils"
 )
 
 type App struct {
@@ -42,6 +42,7 @@ func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	a.sync = sync.NewSyncService(a.db, a.api)
 	a.restoreSession()
+	a.startAutoSync()
 }
 
 func (a *App) shutdown(ctx context.Context) {
@@ -970,7 +971,7 @@ func (a *App) CreateLocalAccountWithPwd(username, password string) map[string]in
 	defaultNb := &models.Notebook{
 		ID:         utils.ObjectId(),
 		NotebookID: defaultNbID,
-		Title:      "Leanote",
+		Title:      "Pearlnote",
 		UserID:     userID,
 		Seq:        0,
 	}
@@ -982,10 +983,10 @@ func (a *App) CreateLocalAccountWithPwd(username, password string) map[string]in
 		NoteID:      defaultNoteID,
 		NotebookID:  defaultNbID,
 		UserID:      userID,
-		Title:       "Welcome to Leanote",
-		Content:     "<h2>Leanote, Not Just A NotePad!</h2><p>Welcome!</p>",
-		Desc:        "Leanote, Not Just A NotePad!",
-		Tags:        []string{"Leanote", "Welcome"},
+		Title:       "Welcome to Pearlnote",
+		Content:     "<h2>Pearlnote 珠玑笔记</h2><p>Welcome!</p>",
+		Desc:        "Pearlnote 珠玑笔记",
+		Tags:        []string{"Pearlnote", "Welcome"},
 		IsDirty:     true,
 		LocalIsNew:  true,
 		CreatedTime: &now,
@@ -994,7 +995,7 @@ func (a *App) CreateLocalAccountWithPwd(username, password string) map[string]in
 	a.db.InsertNote(defaultNote)
 	a.db.CountNotes(defaultNbID)
 
-	a.db.AddOrUpdateTag(userID, "Leanote", false, 0)
+	a.db.AddOrUpdateTag(userID, "Pearlnote", false, 0)
 	a.db.AddOrUpdateTag(userID, "Welcome", false, 0)
 
 	return map[string]interface{}{

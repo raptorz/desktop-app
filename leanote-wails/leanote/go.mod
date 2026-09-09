@@ -1,4 +1,4 @@
-module leanote
+module pearlnote
 
 go 1.23.0
 

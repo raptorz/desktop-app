@@ -2,6 +2,7 @@ package utils
 
 import (
 	"crypto/rand"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"regexp"
@@ -9,7 +10,10 @@ import (
 )
 
 func ObjectId() string {
-	return fmt.Sprintf("%x", time.Now().UnixNano())[0:24]
+	b := make([]byte, 12)
+	binary.BigEndian.PutUint32(b[0:4], uint32(time.Now().Unix()))
+	rand.Read(b[4:12])
+	return hex.EncodeToString(b)
 }
 
 func UUID() string {

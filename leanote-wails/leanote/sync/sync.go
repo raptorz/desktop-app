@@ -6,10 +6,10 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	"leanote/api"
-	"leanote/db"
-	"leanote/models"
-	"leanote/service"
+	"pearlnote/api"
+	"pearlnote/db"
+	"pearlnote/models"
+	"pearlnote/service"
 )
 
 type SyncService struct {

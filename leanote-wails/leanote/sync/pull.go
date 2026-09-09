@@ -8,8 +8,8 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	"leanote/models"
-	"leanote/utils"
+	"pearlnote/models"
+	"pearlnote/utils"
 )
 
 var imageFileIDRe = regexp.MustCompile(`fileId=([a-zA-Z0-9]{24})`)
@@ -195,7 +195,7 @@ func (s *SyncService) syncNoteContentAndFiles(note *models.Note) {
 
 	user, _ := s.db.GetActiveUser()
 	if user != nil && user.Host != "" {
-		localPrefix := "leanote://file/getImage"
+		localPrefix := "/api/file/getImage"
 		content = utils.FixNoteContent(content, user.Host, localPrefix)
 	}
 

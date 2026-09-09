@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"strings"
 
-	"leanote/models"
-	"leanote/utils"
+	"pearlnote/models"
+	"pearlnote/utils"
 )
 
 type AuthResponse struct {

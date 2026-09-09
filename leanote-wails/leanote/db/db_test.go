@@ -3,7 +3,7 @@ package db
 import (
 	"testing"
 
-	"leanote/models"
+	"pearlnote/models"
 )
 
 func TestNewInMemory(t *testing.T) {

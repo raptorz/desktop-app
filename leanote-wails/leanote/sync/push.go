@@ -8,12 +8,12 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	"leanote/api"
-	"leanote/models"
-	"leanote/utils"
+	"pearlnote/api"
+	"pearlnote/models"
+	"pearlnote/utils"
 )
 
-var localImageRe = regexp.MustCompile(`leanote://file/getImage\?fileId=([a-zA-Z0-9]{24})`)
+var localImageRe = regexp.MustCompile(`(?:leanote://file/getImage|/api/file/getImage)\?fileId=([a-zA-Z0-9]{24})`)
 
 func (s *SyncService) sendChanges(syncInfo *models.SyncInfo) error {
 	logrus.Info("Sending changes...")
@@ -161,7 +161,7 @@ func (s *SyncService) prepareNoteForUpload(note *models.Note) *models.Note {
 
 	user, _ := s.db.GetActiveUser()
 	if user != nil && user.Host != "" && note.Content != "" {
-		localPrefix := "leanote://file/getImage"
+		localPrefix := "/api/file/getImage"
 		noteCopy.Content = utils.FixNoteContentForSend(note.Content, user.Host, localPrefix)
 	}
 

@@ -3,8 +3,8 @@ package db
 import (
 	"database/sql"
 
-	"leanote/models"
-	"leanote/utils"
+	"pearlnote/models"
+	"pearlnote/utils"
 )
 
 func (d *Database) InsertTag(tag *models.Tag) error {
