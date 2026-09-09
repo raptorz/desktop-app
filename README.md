@@ -1,48 +1,43 @@
-# Leanote Desktop App
+# Pearlnote Desktop
 
-[![Gitter](https://badges.gitter.im/Join%20Chat.svg)](https://gitter.im/leanote/desktop-app?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge)
+Pearlnote（珠玑笔记）桌面客户端，基于 Go + Wails v2。离线优先：数据存储在本地 SQLite，通过 USN 增量同步与 pearlnote 服务器保持一致；UI 复用 [pearlnote](https://github.com/pearlnote/pearlnote) 主仓库的 Vue Web 前端。
 
-Use Electron(atom-shell) to create leanote desktop app.
+> 本仓库原为 Leanote Electron 桌面端，已完成向 Wails 的迁移并更名为 Pearlnote，Electron 实现已移除（详见 [docs/WAILS_MIGRATION_GUIDE.md](docs/WAILS_MIGRATION_GUIDE.md)）。
 
-![preview.png](preview.png "")
+## 架构概览
 
-## Download
-Please see http://app.leanote.com
-
-## How to develop it
-
-### 1. Install Electron v12.0.2
-
-See https://github.com/electron/electron/releases/tag/v12.0.2
-
-
-### 2. Run it with electron
-
-Download this project, and run
-
-```shell
-# 1. install dependencies
-$> cd PATH-TO-LEANOTE-DESKTOP-APP
-$> npm i
-
-# 2. use gulp to parse less
-$> cd PATH-TO-LEANOTE-DESKTOP-APP/dev
-$> npm i
-$> gulp dev
-
-# 3. run with electron
-$> cd PATH-TO-LEANOTE-DESKTOP-APP
-$> electron .
+```
+Vue SPA（主仓库 frontend/ 构建产物，embed 进二进制）
+   │  fetch 相对路径（/web/*, /note/*, /attach/* ...）
+   ▼
+webapi 兼容层（本地 API，响应契约与服务器端 WebController 一致）
+   ├─ 本地读写 → SQLite + 本地文件（离线可用）
+   └─ 服务器专属功能（共享/分组/管理/注册/邮箱）→ pearlnote 服务器
+   ▲
+USN 同步服务（/api 开放 API + token，菜单或自动触发）
 ```
 
-## Docs
+详细说明见 [leanote-wails/leanote/README.md](leanote-wails/leanote/README.md)。
 
-Please see https://github.com/leanote/desktop-app/wiki
+## 开发与构建
 
+```bash
+cd leanote-wails/leanote
+
+bash build-frontend.sh   # 构建共享 Vue 前端并同步到 embed 目录
+go build -o pearlnote .  # 或 wails build
+wails dev                # 开发模式
+```
+
+Linux 编译依赖：`libgtk-3-dev`、`libwebkit2gtk-4.1-dev`。
+
+## 数据
+
+数据目录：`~/.config/pearlnote`（Windows: `%APPDATA%/pearlnote`，macOS: `~/Library/Application Support/pearlnote`）。首次启动会自动迁移旧 `leanote` 目录的本地数据。
 
 ## LICENSE
 
-[LICENSE](https://github.com/leanote/desktop-app/blob/master/LICENSE)
+[LICENSE](LICENSE)
 
 ```
 LEANOTE - NOT JUST A NOTEPAD!
