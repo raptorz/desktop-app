@@ -4,7 +4,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-ROOT="$(cd ../../.. && pwd)"
+ROOT="$(cd .. && pwd)"
 
 if [ ! -d "$ROOT/frontend/node_modules" ]; then
   npm ci --prefix "$ROOT/frontend"

@@ -89,8 +89,8 @@ func TestGuestBootstrapAndNotLogin(t *testing.T) {
 
 	_, body := e.get(t, "/web/bootstrap")
 	var guest struct {
-		Ok     bool
-		User   any
+		Ok      bool
+		User    any
 		Desktop bool
 	}
 	json.Unmarshal(body, &guest)
@@ -424,4 +424,3 @@ func TestLogoutRedirectsToLogin(t *testing.T) {
 		t.Fatalf("user still active after logout: %s", body)
 	}
 }
-

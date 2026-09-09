@@ -22,7 +22,7 @@ type FileService struct {
 	dataDir string
 }
 
-func getLeanoteDataPath() string {
+func getDataPath() string {
 	homeDir, _ := os.UserHomeDir()
 	switch runtime.GOOS {
 	case "darwin":
@@ -43,7 +43,7 @@ func getLeanoteDataPath() string {
 }
 
 func NewFileService(database *db.Database) *FileService {
-	dataDir := filepath.Join(getLeanoteDataPath(), "data")
+	dataDir := filepath.Join(getDataPath(), "data")
 	os.MkdirAll(dataDir, 0755)
 
 	return &FileService{
@@ -628,8 +628,8 @@ func (fs *FileService) CreateLocalAccount(username string) (map[string]interface
 		NoteID:      utils.ObjectId(),
 		NotebookID:  defaultNb.NotebookID,
 		UserID:      userID,
-		Title:       "Welcome to Leanote",
-		Content:     "# Welcome to Leanote\n\nThis is your first note. Start writing!",
+		Title:       "Welcome to Pearlnote",
+		Content:     "# Welcome to Pearlnote\n\nThis is your first note. Start writing!",
 		IsMarkdown:  true,
 		IsDirty:     true,
 		LocalIsNew:  true,

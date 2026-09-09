@@ -30,7 +30,7 @@ type Database struct {
 func New(dbPath string) (*Database, error) {
 	if dbPath == "" {
 		homeDir, _ := os.UserHomeDir()
-		dbPath = filepath.Join(homeDir, ".leanote", "leanote.db")
+		dbPath = filepath.Join(homeDir, ".pearlnote", "pearlnote.db")
 	}
 
 	dir := filepath.Dir(dbPath)

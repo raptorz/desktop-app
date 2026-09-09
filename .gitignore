@@ -3,8 +3,8 @@
 .project
 
 # Wails build artifacts
-leanote-wails/leanote/leanote
-leanote-wails/leanote/frontend/dist/
-leanote-wails/leanote/build/bin/
+/leanote
+/frontend/dist/
+/build/bin/
 
 node_modules
