@@ -902,7 +902,11 @@ func (h *Handler) doLogin(w http.ResponseWriter, r *http.Request) {
 		if ok, msg := h.Proxy.LoginServer(email, pwd); ok {
 			h.adoptServerUser(email, pwd)
 			h.fireLoginHook()
-			h.writeJSON(w, map[string]any{"Ok": true})
+			result := map[string]any{"Ok": true}
+			if notice := h.Proxy.VersionNotice(); notice != "" {
+				result["Notice"] = notice
+			}
+			h.writeJSON(w, result)
 			return
 		} else if msg != "offline" {
 			h.fail(w, msg)

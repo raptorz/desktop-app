@@ -120,14 +120,24 @@ func (a *App) Login(email, password, host string) map[string]interface{} {
 	a.db.SetCurrentUser(user.ID)
 	a.api.SetToken(resp.Token)
 	a.files.InitUserDirs(user.ID)
-
-	return map[string]interface{}{
+	serverVersion, versionErr := a.api.GetServerVersion()
+	result := map[string]interface{}{
 		"Ok":       true,
 		"UserId":   resp.UserID,
 		"Username": resp.Username,
 		"Email":    resp.Email,
 		"Token":    resp.Token,
 	}
+	if serverVersion != nil {
+		result["Server"] = serverVersion.Server
+		result["ServerVersion"] = serverVersion.Version
+		result["ServerMinVersion"] = serverVersion.MinVersion
+	}
+	if notice := api.ServerVersionNotice(serverVersion, versionErr); notice != "" {
+		result["Notice"] = notice
+	}
+
+	return result
 }
 
 func (a *App) GetCurrentUser() map[string]interface{} {
@@ -1549,7 +1559,7 @@ func (a *App) GetFileJson(path string) map[string]interface{} {
 }
 
 // 15. Version - 版本号
-var AppVersion = "2.0.0"
+var AppVersion = api.ClientVersion
 
 func (a *App) GetVersion() string {
 	return AppVersion

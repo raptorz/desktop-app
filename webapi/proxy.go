@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	pearlnoteapi "pearlnote/api"
 	"pearlnote/db"
 	"pearlnote/models"
 	"pearlnote/service"
@@ -23,10 +24,11 @@ type ServerProxy struct {
 	DB    *db.Database
 	Files *service.FileService
 
-	client    *http.Client
-	email     string
-	pwd       string
-	sessionOk bool
+	client        *http.Client
+	email         string
+	pwd           string
+	sessionOk     bool
+	versionNotice string
 }
 
 func NewServerProxy(database *db.Database, files *service.FileService) *ServerProxy {
@@ -157,8 +159,32 @@ func (p *ServerProxy) LoginServer(email, pwd string) (bool, string) {
 		return false, msg
 	}
 	p.email, p.pwd, p.sessionOk = email, pwd, true
+	p.versionNotice = p.checkServerVersion()
 	return true, ""
 }
+
+// checkServerVersion distinguishes Pearlnote from an older Leanote endpoint.
+// An empty notice means the server could not be checked; login remains usable.
+func (p *ServerProxy) checkServerVersion() string {
+	resp, err := p.client.Get(p.host() + "/api/system/version")
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return "serverMigrationRequired"
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return ""
+	}
+	var info pearlnoteapi.ServerVersion
+	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
+		return ""
+	}
+	return pearlnoteapi.ServerVersionNotice(&info, nil)
+}
+
+func (p *ServerProxy) VersionNotice() string { return p.versionNotice }
 
 func (p *ServerProxy) FetchAPIToken(email, pwd string) string {
 	if !p.configured() {

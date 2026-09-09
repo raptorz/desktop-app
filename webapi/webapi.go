@@ -102,6 +102,9 @@ func (h *Handler) route(w http.ResponseWriter, r *http.Request) bool {
 	case path == "/api/file/getImage" || path == "/file/getImage":
 		h.serveImage(w, r)
 	case path == "/doLogin":
+		if host := h.form(r, "host"); host != "" && h.Proxy != nil {
+			h.Proxy.SetHost(host)
+		}
 		h.doLogin(w, r)
 	case path == "/logout" && method == http.MethodGet:
 		h.logout(w, r)
