@@ -72,6 +72,7 @@ func (s *SyncService) FullSync() (*models.SyncInfo, error) {
 	}
 
 	s.db.SetCurrentUser(user.ID)
+	s.api.SetHost(user.Host)
 	s.api.SetToken(user.Token)
 
 	lastUsn, notebookUsn, noteUsn, tagUsn, err := s.db.GetAllLastSyncState(user.ID)
@@ -89,32 +90,39 @@ func (s *SyncService) FullSync() (*models.SyncInfo, error) {
 	s.emitProgress("notebooks", 0, 100)
 	if err := s.syncNotebooks(notebookUsn, syncInfo); err != nil {
 		logrus.Errorf("Sync notebooks error: %v", err)
+		return nil, err
 	}
 
 	s.emitProgress("notes", 20, 100)
 	if err := s.syncNotes(noteUsn, syncInfo); err != nil {
 		logrus.Errorf("Sync notes error: %v", err)
+		return nil, err
 	}
 
 	s.emitProgress("tags", 40, 100)
 	if err := s.syncTags(tagUsn, syncInfo); err != nil {
 		logrus.Errorf("Sync tags error: %v", err)
+		return nil, err
 	}
 
 	s.emitProgress("push", 60, 100)
 	if err := s.sendChanges(syncInfo); err != nil {
 		logrus.Errorf("Send changes error: %v", err)
+		return nil, err
 	}
 
 	s.emitProgress("images", 80, 100)
 	if err := s.syncImagesAndAttachs(syncInfo); err != nil {
 		logrus.Errorf("Sync images/attachs error: %v", err)
+		return nil, err
 	}
 
-	s.db.UpdateUserSyncState(user.ID, map[string]int64{
+	if err := s.db.UpdateUserSyncState(user.ID, map[string]int64{
 		"last_sync_usn":  serverState.LastSyncUsn,
 		"last_sync_time": time.Now().Unix(),
-	})
+	}); err != nil {
+		return nil, err
+	}
 
 	s.emitProgress("done", 100, 100)
 	logrus.Info("Full sync completed")
@@ -148,6 +156,7 @@ func (s *SyncService) IncrSync() (*models.SyncInfo, error) {
 	}
 
 	s.db.SetCurrentUser(user.ID)
+	s.api.SetHost(user.Host)
 	s.api.SetToken(user.Token)
 
 	lastUsn, _, _, _, err := s.db.GetAllLastSyncState(user.ID)

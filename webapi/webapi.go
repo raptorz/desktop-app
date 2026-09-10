@@ -14,12 +14,16 @@ import (
 const pageSize = 100
 
 type Handler struct {
-	DB               *db.Database
-	Files            *service.FileService
-	Proxy            *ServerProxy
-	Version          string
-	Dist             fs.FS
-	OnLogin          func()
+	DB      *db.Database
+	Files   *service.FileService
+	Proxy   *ServerProxy
+	Version string
+	Dist    fs.FS
+	OnLogin func()
+	// OnLogout is called synchronously before the local session is cleared.
+	// Returning an error keeps the session active so local changes are not
+	// discarded when the final sync cannot be completed.
+	OnLogout         func() error
 	OnSharedDownload func()
 }
 

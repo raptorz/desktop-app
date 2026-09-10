@@ -297,6 +297,12 @@ func (p *ServerProxy) Logout() {
 		p.call(http.MethodGet, "/logout", nil, nil)
 	}
 	p.sessionOk = false
+	// Credentials are only a session aid for reconnecting while logged in.
+	// Keeping them after logout would let a later proxied request silently
+	// authenticate again without an explicit login.
+	p.email, p.pwd = "", ""
+	p.DB.SetConfig("proxy:email", "")
+	p.DB.SetConfig("proxy:pwd", "")
 }
 
 func (p *ServerProxy) Forward(w http.ResponseWriter, r *http.Request, form url.Values, file *multipart.FileHeader) bool {

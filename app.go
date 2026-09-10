@@ -119,7 +119,13 @@ func (a *App) Login(email, password, host string) map[string]interface{} {
 	a.db.InsertUser(user)
 	a.db.SetCurrentUser(user.ID)
 	a.api.SetToken(resp.Token)
+	a.api.SetHost(host)
 	a.files.InitUserDirs(user.ID)
+	// A successful remote login always starts from a full server snapshot.
+	// Keep the local cache for offline use, but never trust its old cursors.
+	if err := a.sync.ForceFullSync(); err != nil {
+		return map[string]interface{}{"Ok": false, "Msg": err.Error()}
+	}
 	serverVersion, versionErr := a.api.GetServerVersion()
 	result := map[string]interface{}{
 		"Ok":       true,
@@ -156,12 +162,22 @@ func (a *App) GetCurrentUser() map[string]interface{} {
 	}
 }
 
-func (a *App) Logout() {
+func (a *App) Logout() map[string]interface{} {
+	if user, _ := a.db.GetActiveUser(); user != nil && !user.IsLocal && user.Host != "" && user.Token != "" {
+		if _, err := a.sync.FullSync(); err != nil {
+			return map[string]interface{}{"Ok": false, "Msg": "syncFailed"}
+		}
+	}
 	a.api.Logout()
+	a.api.SetToken("")
+	a.api.SetHost("")
 	user, _ := a.db.GetActiveUser()
 	if user != nil {
 		a.db.UpdateUserToken(user.ID, "")
 	}
+	a.db.DeactivateAllUsers()
+	a.db.SetCurrentUser("")
+	return map[string]interface{}{"Ok": true}
 }
 
 func (a *App) CreateLocalAccount(username string) map[string]interface{} {

@@ -105,12 +105,28 @@ func main() {
 	}
 
 	apiHandler := &webapi.Handler{
-		DB:               database,
-		Files:            service.NewFileService(database),
-		Proxy:            webapi.NewServerProxy(database, app.files),
-		Version:          AppVersion,
-		Dist:             dist,
-		OnLogin:          func() { go app.sharedSync.SyncOnce() },
+		DB:      database,
+		Files:   service.NewFileService(database),
+		Proxy:   webapi.NewServerProxy(database, app.files),
+		Version: AppVersion,
+		Dist:    dist,
+		OnLogin: func() {
+			// A server login must not reuse the previous account's cursors. The
+			// personal full sync runs immediately after authentication while the
+			// shared cache refresh remains independent.
+			go func() {
+				_ = app.sync.ForceFullSync()
+				_ = app.sharedSync.SyncOnce()
+			}()
+		},
+		OnLogout: func() error {
+			user, _ := database.GetActiveUser()
+			if user == nil || user.IsLocal || user.Host == "" || user.Token == "" {
+				return nil
+			}
+			_, err := app.sync.FullSync()
+			return err
+		},
 		OnSharedDownload: func() { go app.sharedSync.DownloadPending() },
 	}
 

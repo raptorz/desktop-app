@@ -3,6 +3,7 @@ package webapi
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -70,7 +71,7 @@ func (e *testEnv) login(t *testing.T) (userID, notebookID string) {
 	userID = utils.ObjectId()
 	hashed := utils.MD5WithSalt("secret", userID)
 	now := time.Now()
-	if err := e.db.InsertUser(&models.User{ID: userID, Username: "tester", Email: "t@pearlnote.test", Pwd: hashed, IsActive: true, CreatedTime: &now}); err != nil {
+	if err := e.db.InsertUser(&models.User{ID: userID, Username: "tester", Email: "t@pearlnote.test", Pwd: hashed, IsActive: true, IsLocal: true, CreatedTime: &now}); err != nil {
 		t.Fatal(err)
 	}
 	e.db.SetCurrentUser(userID)
@@ -446,5 +447,46 @@ func TestLogoutRedirectsToLogin(t *testing.T) {
 	_, body := e.get(t, "/web/bootstrap")
 	if !strings.Contains(string(body), `"User":null`) {
 		t.Fatalf("user still active after logout: %s", body)
+	}
+}
+
+func TestRemoteLoginDoesNotUseMatchingLocalAccount(t *testing.T) {
+	e := newTestEnv(t)
+	userID := utils.ObjectId()
+	hashed := utils.MD5WithSalt("secret", userID)
+	if err := e.db.InsertUser(&models.User{ID: userID, Username: "same", Email: "same@example.test", Pwd: hashed, IsLocal: true}); err != nil {
+		t.Fatal(err)
+	}
+	proxy := NewServerProxy(e.db, e.handler.Files)
+	proxy.SetHost("http://127.0.0.1:1")
+	e.handler.Proxy = proxy
+
+	var result struct {
+		Ok  bool
+		Msg string
+	}
+	e.postJSON(t, "/doLogin", url.Values{"email": {"same@example.test"}, "pwd": {"secret"}}, &result)
+	if result.Ok || result.Msg != "offline" {
+		t.Fatalf("remote login unexpectedly used local account: %+v", result)
+	}
+	if active, _ := e.db.GetActiveUser(); active != nil {
+		t.Fatalf("local account became active after failed remote login: %+v", active)
+	}
+}
+
+func TestLogoutSyncFailureKeepsSession(t *testing.T) {
+	e := newTestEnv(t)
+	userID := utils.ObjectId()
+	if err := e.db.InsertUser(&models.User{ID: userID, Username: "remote", Host: "https://notes.example", Token: "token", IsActive: true}); err != nil {
+		t.Fatal(err)
+	}
+	e.handler.OnLogout = func() error { return fmt.Errorf("sync unavailable") }
+	code, body := e.get(t, "/logout")
+	if code != http.StatusOK || !strings.Contains(string(body), "syncFailed") {
+		t.Fatalf("logout did not report sync failure: %d %s", code, body)
+	}
+	active, _ := e.db.GetActiveUser()
+	if active == nil || active.Token != "token" {
+		t.Fatalf("session was cleared after failed sync: %+v", active)
 	}
 }

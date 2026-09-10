@@ -883,8 +883,32 @@ func (h *Handler) doLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A configured server is always authoritative for remote login. Do not
+	// reuse a local user with the same username/email: that would show the old
+	// server's cache without validating credentials against the new server.
+	if h.Proxy != nil && h.Proxy.configured() {
+		if ok, msg := h.Proxy.LoginServer(email, pwd); ok {
+			h.adoptServerUser(email, pwd)
+			h.fireLoginHook()
+			result := map[string]any{"Ok": true}
+			if notice := h.Proxy.VersionNotice(); notice != "" {
+				result["Notice"] = notice
+			}
+			h.writeJSON(w, result)
+			return
+		} else {
+			if msg == "offline" {
+				h.fail(w, "offline")
+			} else {
+				h.fail(w, msg)
+			}
+			return
+		}
+	}
+
+	// Only explicitly local accounts may authenticate from the local cache.
 	user, _ := h.DB.GetUserByNameOrEmail(email)
-	if user != nil {
+	if user != nil && user.IsLocal && user.Host == "" {
 		if msg := h.verifyLocalPassword(user, pwd); msg != "" {
 			h.fail(w, msg)
 			return
@@ -898,21 +922,6 @@ func (h *Handler) doLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if h.Proxy != nil {
-		if ok, msg := h.Proxy.LoginServer(email, pwd); ok {
-			h.adoptServerUser(email, pwd)
-			h.fireLoginHook()
-			result := map[string]any{"Ok": true}
-			if notice := h.Proxy.VersionNotice(); notice != "" {
-				result["Notice"] = notice
-			}
-			h.writeJSON(w, result)
-			return
-		} else if msg != "offline" {
-			h.fail(w, msg)
-			return
-		}
-	}
 	h.fail(w, "userNotExist")
 }
 
@@ -964,6 +973,12 @@ func (h *Handler) verifyLocalPassword(user *models.User, password string) string
 }
 
 func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
+	if h.OnLogout != nil {
+		if err := h.OnLogout(); err != nil {
+			h.fail(w, "syncFailed")
+			return
+		}
+	}
 	if h.Proxy != nil {
 		h.Proxy.Logout()
 	}
