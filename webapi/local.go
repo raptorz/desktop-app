@@ -132,6 +132,10 @@ func (h *Handler) bootstrap(w http.ResponseWriter) {
 	if tags == nil {
 		tags = []*models.Tag{}
 	}
+	totalNotes, err := h.DB.CountAllNotes(user.ID)
+	if err != nil {
+		totalNotes = 0
+	}
 
 	shared := map[string]any{}
 	isAdmin := false
@@ -152,6 +156,7 @@ func (h *Handler) bootstrap(w http.ResponseWriter) {
 		"Notebooks":       h.DB.MapNotebooks(notebooks),
 		"SharedNotebooks": shared,
 		"Tags":            tags,
+		"TotalNotes":      totalNotes,
 		"Version":         h.Version,
 		"SharedCache":     h.sharedCacheState(user),
 	})
@@ -489,11 +494,19 @@ func (h *Handler) addNotebook(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, "noTitle")
 		return
 	}
+	parentNotebookID := h.form(r, "parentNotebookId")
+	if parentNotebookID != "" {
+		parent, err := h.DB.GetNotebook(parentNotebookID)
+		if err != nil || parent == nil || parent.UserID != user.ID || parent.LocalIsDelete {
+			h.fail(w, "invalidParentNotebook")
+			return
+		}
+	}
 	now := time.Now()
 	nb := &models.Notebook{
 		ID:               utils.ObjectId(),
 		NotebookID:       h.form(r, "notebookId"),
-		ParentNotebookID: h.form(r, "parentNotebookId"),
+		ParentNotebookID: parentNotebookID,
 		Title:            title,
 		UserID:           user.ID,
 		IsDirty:          true,

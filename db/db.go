@@ -391,7 +391,7 @@ func (d *Database) CountNotebooks(userID string) (int, error) {
 
 func (d *Database) CountAllNotes(userID string) (int, error) {
 	var count int
-	err := d.db.QueryRow(`SELECT COUNT(*) FROM notes WHERE user_id = ? AND is_trash = 0 AND local_is_delete = 0`, userID).Scan(&count)
+	err := d.db.QueryRow(`SELECT COUNT(*) FROM notes WHERE user_id = ? AND is_trash = 0 AND (local_is_delete = 0 OR local_is_delete IS NULL)`, userID).Scan(&count)
 	return count, err
 }
 
