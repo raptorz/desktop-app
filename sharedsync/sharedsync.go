@@ -12,10 +12,10 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	"pearlnote/api"
-	"pearlnote/db"
-	"pearlnote/models"
-	"pearlnote/service"
+	"github.com/gemsnote/gemsnote/api"
+	"github.com/gemsnote/gemsnote/db"
+	"github.com/gemsnote/gemsnote/models"
+	"github.com/gemsnote/gemsnote/service"
 )
 
 const (

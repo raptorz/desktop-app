@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"pearlnote/models"
-	"pearlnote/utils"
+	"github.com/gemsnote/gemsnote/models"
+	"github.com/gemsnote/gemsnote/utils"
 )
 
 func SharedAccountID(host, userID string) string {

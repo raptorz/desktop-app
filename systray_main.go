@@ -15,8 +15,8 @@ var iconData []byte
 func RunSystray(app *App) {
 	systray.Run(func() {
 		systray.SetIcon(iconData)
-		systray.SetTitle("Pearlnote")
-		systray.SetTooltip("Pearlnote 珠玑笔记")
+		systray.SetTitle("Gemsnote")
+		systray.SetTooltip("Gemsnote 珠玑笔记")
 
 		mShow := systray.AddMenuItem("Show", "Show main window")
 		mSync := systray.AddMenuItem("Sync Now", "Start sync")

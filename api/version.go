@@ -23,7 +23,7 @@ func ServerVersionNotice(info *ServerVersion, err error) string {
 		}
 		return ""
 	}
-	if info == nil || info.Server != "pearlnote" {
+	if info == nil || info.Server != "gemsnote" {
 		return "serverMigrationRequired"
 	}
 	if info.MinVersion != "" && CompareVersions(ClientVersion, info.MinVersion) < 0 {

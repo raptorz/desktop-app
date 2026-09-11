@@ -7,7 +7,7 @@ import (
 	"mime"
 	"net/url"
 
-	"pearlnote/models"
+	"github.com/gemsnote/gemsnote/models"
 )
 
 type SharedAPIError struct {
@@ -164,5 +164,5 @@ func (c *Client) GetSharedNoteFile(noteID, fileID string) ([]byte, string, error
 		}
 		return nil, "", fmt.Errorf("unexpected JSON shared file response")
 	}
-	return resp.Body(), resp.Header().Get("X-Pearlnote-SHA256"), nil
+	return resp.Body(), resp.Header().Get("X-Gemsnote-SHA256"), nil
 }

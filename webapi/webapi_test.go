@@ -14,10 +14,10 @@ import (
 	"testing/fstest"
 	"time"
 
-	"pearlnote/db"
-	"pearlnote/models"
-	"pearlnote/service"
-	"pearlnote/utils"
+	"github.com/gemsnote/gemsnote/db"
+	"github.com/gemsnote/gemsnote/models"
+	"github.com/gemsnote/gemsnote/service"
+	"github.com/gemsnote/gemsnote/utils"
 )
 
 type testEnv struct {
@@ -71,7 +71,7 @@ func (e *testEnv) login(t *testing.T) (userID, notebookID string) {
 	userID = utils.ObjectId()
 	hashed := utils.MD5WithSalt("secret", userID)
 	now := time.Now()
-	if err := e.db.InsertUser(&models.User{ID: userID, Username: "tester", Email: "t@pearlnote.test", Pwd: hashed, IsActive: true, IsLocal: true, CreatedTime: &now}); err != nil {
+	if err := e.db.InsertUser(&models.User{ID: userID, Username: "tester", Email: "t@gemsnote.test", Pwd: hashed, IsActive: true, IsLocal: true, CreatedTime: &now}); err != nil {
 		t.Fatal(err)
 	}
 	e.db.SetCurrentUser(userID)

@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"strings"
 
-	"pearlnote/models"
-	"pearlnote/utils"
+	"github.com/gemsnote/gemsnote/models"
+	"github.com/gemsnote/gemsnote/utils"
 )
 
 type AuthResponse struct {

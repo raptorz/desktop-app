@@ -8,9 +8,9 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	"pearlnote/api"
-	"pearlnote/models"
-	"pearlnote/utils"
+	"github.com/gemsnote/gemsnote/api"
+	"github.com/gemsnote/gemsnote/models"
+	"github.com/gemsnote/gemsnote/utils"
 )
 
 var localImageRe = regexp.MustCompile(`(?:leanote://file/getImage|/api/file/getImage)\?fileId=([a-zA-Z0-9]{24})`)

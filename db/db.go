@@ -9,9 +9,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gemsnote/gemsnote/models"
+	"github.com/gemsnote/gemsnote/utils"
 	"github.com/sirupsen/logrus"
-	"pearlnote/models"
-	"pearlnote/utils"
 
 	_ "modernc.org/sqlite"
 )
@@ -30,7 +30,7 @@ type Database struct {
 func New(dbPath string) (*Database, error) {
 	if dbPath == "" {
 		homeDir, _ := os.UserHomeDir()
-		dbPath = filepath.Join(homeDir, ".pearlnote", "pearlnote.db")
+		dbPath = filepath.Join(homeDir, ".gemsnote", "gemsnote.db")
 	}
 
 	dir := filepath.Dir(dbPath)

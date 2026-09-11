@@ -14,9 +14,9 @@ import (
 	"strings"
 	"time"
 
-	"pearlnote/db"
-	"pearlnote/models"
-	"pearlnote/utils"
+	"github.com/gemsnote/gemsnote/db"
+	"github.com/gemsnote/gemsnote/models"
+	"github.com/gemsnote/gemsnote/utils"
 )
 
 var (
@@ -698,7 +698,7 @@ func saveMultipartFile(fh *multipart.FileHeader, dir string) (string, error) {
 	defer src.Close()
 
 	ext := filepath.Ext(fh.Filename)
-	tmp, err := os.CreateTemp("", "pearlnote-upload-*"+ext)
+	tmp, err := os.CreateTemp("", "gemsnote-upload-*"+ext)
 	if err != nil {
 		return "", err
 	}

@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"time"
 
-	"pearlnote/models"
-	"pearlnote/utils"
+	"github.com/gemsnote/gemsnote/models"
+	"github.com/gemsnote/gemsnote/utils"
 )
 
 func (d *Database) InsertNote(note *models.Note) error {

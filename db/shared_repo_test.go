@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"pearlnote/models"
+	"github.com/gemsnote/gemsnote/models"
 )
 
 func TestSharedSnapshotAccountIsolationAndRevocation(t *testing.T) {

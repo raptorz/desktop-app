@@ -4,8 +4,8 @@ import (
 	"database/sql"
 	"time"
 
-	"pearlnote/models"
-	"pearlnote/utils"
+	"github.com/gemsnote/gemsnote/models"
+	"github.com/gemsnote/gemsnote/utils"
 )
 
 func (d *Database) InsertNotebook(nb *models.Notebook) error {

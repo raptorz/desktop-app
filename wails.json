@@ -1,7 +1,7 @@
 {
   "$schema": "https://wails.io/schemas/config.v2.json",
-  "name": "pearlnote",
-  "outputfilename": "pearlnote",
+  "name": "gemsnote",
+  "outputfilename": "gemsnote",
   "frontend:install": "echo 'skip'",
   "frontend:build": "bash build-frontend.sh",
   "frontend:dev:watcher": "echo 'skip'",

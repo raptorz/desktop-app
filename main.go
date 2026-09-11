@@ -17,9 +17,9 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options/mac"
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
-	"pearlnote/db"
-	"pearlnote/service"
-	"pearlnote/webapi"
+	"github.com/gemsnote/gemsnote/db"
+	"github.com/gemsnote/gemsnote/service"
+	"github.com/gemsnote/gemsnote/webapi"
 )
 
 //go:embed all:frontend/dist
@@ -29,26 +29,26 @@ func getDataPath() string {
 	homeDir, _ := os.UserHomeDir()
 	switch runtime.GOOS {
 	case "darwin":
-		return filepath.Join(homeDir, "Library", "Application Support", "pearlnote")
+		return filepath.Join(homeDir, "Library", "Application Support", "gemsnote")
 	case "windows":
 		appData := os.Getenv("APPDATA")
 		if appData == "" {
 			appData = filepath.Join(homeDir, "AppData", "Roaming")
 		}
-		return filepath.Join(appData, "pearlnote")
+		return filepath.Join(appData, "gemsnote")
 	default:
 		configDir := os.Getenv("XDG_CONFIG_HOME")
 		if configDir == "" {
 			configDir = filepath.Join(homeDir, ".config")
 		}
-		return filepath.Join(configDir, "pearlnote")
+		return filepath.Join(configDir, "gemsnote")
 	}
 }
 
 // migrateLegacyData silently adopts the pre-rename "leanote" data directory so upgrades keep their local data.
 func migrateLegacyData(dataPath string) {
 	legacy := filepath.Join(filepath.Dir(dataPath), "leanote")
-	if _, err := os.Stat(filepath.Join(dataPath, "pearlnote.db")); err == nil {
+	if _, err := os.Stat(filepath.Join(dataPath, "gemsnote.db")); err == nil {
 		return
 	}
 	if _, err := os.Stat(filepath.Join(legacy, "leanote.db")); err != nil {
@@ -82,7 +82,7 @@ func main() {
 	dataPath := getDataPath()
 	os.MkdirAll(dataPath, 0755)
 	migrateLegacyData(dataPath)
-	dbPath := filepath.Join(dataPath, "pearlnote.db")
+	dbPath := filepath.Join(dataPath, "gemsnote.db")
 
 	database, err := db.New(dbPath)
 	if err != nil {
@@ -131,7 +131,7 @@ func main() {
 	}
 
 	err = wails.Run(&options.App{
-		Title:     "Pearlnote 珠玑笔记",
+		Title:     "Gemsnote 珠玑笔记",
 		Width:     1050,
 		Height:    595,
 		MinWidth:  800,
@@ -148,7 +148,7 @@ func main() {
 		},
 		Menu: appMenu,
 		SingleInstanceLock: &options.SingleInstanceLock{
-			UniqueId: "com.pearlnote.desktop",
+			UniqueId: "com.gemsnote.desktop",
 			OnSecondInstanceLaunch: func(secondInstanceData options.SecondInstanceData) {
 				app.ShowWindow()
 				if len(secondInstanceData.Args) > 1 {
@@ -160,7 +160,7 @@ func main() {
 			},
 		},
 		Linux: &linux.Options{
-			ProgramName: "Pearlnote",
+			ProgramName: "Gemsnote",
 		},
 		Mac: &mac.Options{
 			TitleBar: mac.TitleBarHiddenInset(),

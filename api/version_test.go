@@ -20,13 +20,13 @@ func TestCompareVersions(t *testing.T) {
 }
 
 func TestServerVersionNotice(t *testing.T) {
-	if got := ServerVersionNotice(&ServerVersion{Server: "pearlnote", Version: "1.0.0"}, nil); got != "" {
+	if got := ServerVersionNotice(&ServerVersion{Server: "gemsnote", Version: "1.0.0"}, nil); got != "" {
 		t.Fatalf("compatible server notice = %q", got)
 	}
-	if got := ServerVersionNotice(&ServerVersion{Server: "pearlnote", Version: "1.0.0", MinVersion: "1.1.0"}, nil); got != "clientUpgradeRequired" {
+	if got := ServerVersionNotice(&ServerVersion{Server: "gemsnote", Version: "1.0.0", MinVersion: "1.1.0"}, nil); got != "clientUpgradeRequired" {
 		t.Fatalf("minimum version notice = %q", got)
 	}
-	if got := ServerVersionNotice(&ServerVersion{Server: "pearlnote", Version: "0.9.0"}, nil); got != "serverUpgradeRequired" {
+	if got := ServerVersionNotice(&ServerVersion{Server: "gemsnote", Version: "0.9.0"}, nil); got != "serverUpgradeRequired" {
 		t.Fatalf("server version notice = %q", got)
 	}
 	if got := ServerVersionNotice(nil, &SharedAPIError{Status: 404}); got != "serverMigrationRequired" {

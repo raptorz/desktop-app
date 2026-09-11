@@ -1,8 +1,8 @@
-# Pearlnote Desktop
+# Gemsnote Desktop
 
-Pearlnote（珠玑笔记）桌面客户端，基于 Go + Wails v2。离线优先：数据存储在本地 SQLite，通过 USN 增量同步与 pearlnote 服务器保持一致；UI 复用 [pearlnote](https://github.com/pearlnote/pearlnote) 主仓库的 Vue Web 前端。
+Gemsnote（珠玑笔记）桌面客户端，基于 Go + Wails v2。离线优先：数据存储在本地 SQLite，通过 USN 增量同步与 gemsnote 服务器保持一致；UI 复用 [gemsnote](https://github.com/gemsnote/gemsnote) 主仓库的 Vue Web 前端。
 
-> 本仓库原为 Leanote Electron 桌面端，已完成向 Wails 的迁移并更名为 Pearlnote，Electron 实现已移除（详见 [docs/WAILS_MIGRATION_GUIDE.md](docs/WAILS_MIGRATION_GUIDE.md)）。
+> 本仓库原为 Leanote Electron 桌面端，已完成向 Wails 的迁移并更名为 Gemsnote，Electron 实现已移除（详见 [docs/WAILS_MIGRATION_GUIDE.md](docs/WAILS_MIGRATION_GUIDE.md)）。
 
 ## 架构
 
@@ -14,7 +14,7 @@ webapi.Handler  ←  本地 API 兼容层（响应契约与 Revel 端 WebControl
    │                    │
    │ 本地读写            │ 服务器专属功能代理
    ▼                    ▼
-SQLite (db/)      pearlnote 服务器（共享/分组/管理/邮箱，cookie 会话）
+SQLite (db/)      gemsnote 服务器（共享/分组/管理/邮箱，cookie 会话）
    ▲
 sync/ (USN 增量同步, /api 开放 API + token)
 ```
@@ -31,7 +31,7 @@ sync/ (USN 增量同步, /api 开放 API + token)
 bash build-frontend.sh
 
 # 2. 编译（需要各平台 webkit 依赖；Linux 需 libgtk-3-dev libwebkit2gtk-4.1-dev）
-go build -o pearlnote .
+go build -o gemsnote .
 # 或
 wails build
 ```
@@ -44,7 +44,7 @@ wails dev
 
 ## 数据
 
-数据目录：`~/.config/pearlnote`（Windows: `%APPDATA%/pearlnote`，macOS: `~/Library/Application Support/pearlnote`）。首次启动会自动迁移旧 `leanote` 目录的数据。
+数据目录：`~/.config/gemsnote`（Windows: `%APPDATA%/gemsnote`，macOS: `~/Library/Application Support/gemsnote`）。首次启动会自动迁移旧 `leanote` 目录的数据。
 
 ## LICENSE
 

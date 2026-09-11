@@ -13,11 +13,11 @@ import (
 	"strings"
 	"time"
 
-	pearlnoteapi "pearlnote/api"
-	"pearlnote/db"
-	"pearlnote/models"
-	"pearlnote/service"
-	"pearlnote/utils"
+	gemsnoteapi "github.com/gemsnote/gemsnote/api"
+	"github.com/gemsnote/gemsnote/db"
+	"github.com/gemsnote/gemsnote/models"
+	"github.com/gemsnote/gemsnote/service"
+	"github.com/gemsnote/gemsnote/utils"
 )
 
 type ServerProxy struct {
@@ -163,7 +163,7 @@ func (p *ServerProxy) LoginServer(email, pwd string) (bool, string) {
 	return true, ""
 }
 
-// checkServerVersion distinguishes Pearlnote from an older Leanote endpoint.
+// checkServerVersion distinguishes Gemsnote from an older Leanote endpoint.
 // An empty notice means the server could not be checked; login remains usable.
 func (p *ServerProxy) checkServerVersion() string {
 	resp, err := p.client.Get(p.host() + "/api/system/version")
@@ -177,11 +177,11 @@ func (p *ServerProxy) checkServerVersion() string {
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return ""
 	}
-	var info pearlnoteapi.ServerVersion
+	var info gemsnoteapi.ServerVersion
 	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
 		return ""
 	}
-	return pearlnoteapi.ServerVersionNotice(&info, nil)
+	return gemsnoteapi.ServerVersionNotice(&info, nil)
 }
 
 func (p *ServerProxy) VersionNotice() string { return p.versionNotice }

@@ -12,9 +12,9 @@ import (
 	"strings"
 	"time"
 
-	"pearlnote/db"
-	"pearlnote/models"
-	"pearlnote/utils"
+	"github.com/gemsnote/gemsnote/db"
+	"github.com/gemsnote/gemsnote/models"
+	"github.com/gemsnote/gemsnote/utils"
 )
 
 type FileService struct {
@@ -26,19 +26,19 @@ func getDataPath() string {
 	homeDir, _ := os.UserHomeDir()
 	switch runtime.GOOS {
 	case "darwin":
-		return filepath.Join(homeDir, "Library", "Application Support", "pearlnote")
+		return filepath.Join(homeDir, "Library", "Application Support", "gemsnote")
 	case "windows":
 		appData := os.Getenv("APPDATA")
 		if appData == "" {
 			appData = filepath.Join(homeDir, "AppData", "Roaming")
 		}
-		return filepath.Join(appData, "pearlnote")
+		return filepath.Join(appData, "gemsnote")
 	default:
 		configDir := os.Getenv("XDG_CONFIG_HOME")
 		if configDir == "" {
 			configDir = filepath.Join(homeDir, ".config")
 		}
-		return filepath.Join(configDir, "pearlnote")
+		return filepath.Join(configDir, "gemsnote")
 	}
 }
 
@@ -628,8 +628,8 @@ func (fs *FileService) CreateLocalAccount(username string) (map[string]interface
 		NoteID:      utils.ObjectId(),
 		NotebookID:  defaultNb.NotebookID,
 		UserID:      userID,
-		Title:       "Welcome to Pearlnote",
-		Content:     "# Welcome to Pearlnote\n\nThis is your first note. Start writing!",
+		Title:       "Welcome to Gemsnote",
+		Content:     "# Welcome to Gemsnote\n\nThis is your first note. Start writing!",
 		IsMarkdown:  true,
 		IsDirty:     true,
 		LocalIsNew:  true,

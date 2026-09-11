@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"strings"
 
-	"pearlnote/db"
-	"pearlnote/service"
+	"github.com/gemsnote/gemsnote/db"
+	"github.com/gemsnote/gemsnote/service"
 )
 
 const pageSize = 100

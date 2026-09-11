@@ -10,10 +10,10 @@ import (
 	"sync"
 	"testing"
 
-	"pearlnote/api"
-	"pearlnote/db"
-	"pearlnote/models"
-	"pearlnote/service"
+	"github.com/gemsnote/gemsnote/api"
+	"github.com/gemsnote/gemsnote/db"
+	"github.com/gemsnote/gemsnote/models"
+	"github.com/gemsnote/gemsnote/service"
 )
 
 const (
@@ -107,7 +107,7 @@ func (m *mockServer) handler(w http.ResponseWriter, r *http.Request) {
 
 	case "/api/shared/notes/" + testNoteID + "/files/" + testImageID:
 		w.Header().Set("Content-Type", "application/octet-stream")
-		w.Header().Set("X-Pearlnote-SHA256", digest(m.imageBytes))
+		w.Header().Set("X-Gemsnote-SHA256", digest(m.imageBytes))
 		w.Write(m.imageBytes)
 
 	default:
@@ -131,7 +131,7 @@ func newTestService(t *testing.T, mutate func(*mockServer)) (*Service, *mockServ
 	t.Cleanup(server.srv.Close)
 
 	if err := database.InsertUser(&models.User{
-		ID: testUser, Username: "tester", Email: "t@pearlnote.test", Token: "tok", Host: server.srv.URL, IsActive: true,
+		ID: testUser, Username: "tester", Email: "t@gemsnote.test", Token: "tok", Host: server.srv.URL, IsActive: true,
 	}); err != nil {
 		t.Fatal(err)
 	}

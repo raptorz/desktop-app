@@ -13,13 +13,13 @@ import (
 	"github.com/signintech/gopdf"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
-	"pearlnote/api"
-	"pearlnote/db"
-	"pearlnote/models"
-	"pearlnote/service"
-	"pearlnote/sharedsync"
-	"pearlnote/sync"
-	"pearlnote/utils"
+	"github.com/gemsnote/gemsnote/api"
+	"github.com/gemsnote/gemsnote/db"
+	"github.com/gemsnote/gemsnote/models"
+	"github.com/gemsnote/gemsnote/service"
+	"github.com/gemsnote/gemsnote/sharedsync"
+	"github.com/gemsnote/gemsnote/sync"
+	"github.com/gemsnote/gemsnote/utils"
 )
 
 type App struct {
@@ -1005,7 +1005,7 @@ func (a *App) CreateLocalAccountWithPwd(username, password string) map[string]in
 	defaultNb := &models.Notebook{
 		ID:         utils.ObjectId(),
 		NotebookID: defaultNbID,
-		Title:      "Pearlnote",
+		Title:      "Gemsnote",
 		UserID:     userID,
 		Seq:        0,
 	}
@@ -1017,10 +1017,10 @@ func (a *App) CreateLocalAccountWithPwd(username, password string) map[string]in
 		NoteID:      defaultNoteID,
 		NotebookID:  defaultNbID,
 		UserID:      userID,
-		Title:       "Welcome to Pearlnote",
-		Content:     "<h2>Pearlnote 珠玑笔记</h2><p>Welcome!</p>",
-		Desc:        "Pearlnote 珠玑笔记",
-		Tags:        []string{"Pearlnote", "Welcome"},
+		Title:       "Welcome to Gemsnote",
+		Content:     "<h2>Gemsnote 珠玑笔记</h2><p>Welcome!</p>",
+		Desc:        "Gemsnote 珠玑笔记",
+		Tags:        []string{"Gemsnote", "Welcome"},
 		IsDirty:     true,
 		LocalIsNew:  true,
 		CreatedTime: &now,
@@ -1029,7 +1029,7 @@ func (a *App) CreateLocalAccountWithPwd(username, password string) map[string]in
 	a.db.InsertNote(defaultNote)
 	a.db.CountNotes(defaultNbID)
 
-	a.db.AddOrUpdateTag(userID, "Pearlnote", false, 0)
+	a.db.AddOrUpdateTag(userID, "Gemsnote", false, 0)
 	a.db.AddOrUpdateTag(userID, "Welcome", false, 0)
 
 	return map[string]interface{}{
