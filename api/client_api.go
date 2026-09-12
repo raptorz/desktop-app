@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -225,6 +226,64 @@ type APIResponse struct {
 	Notebook *models.Notebook `json:",omitempty"`
 	Note     *models.Note     `json:",omitempty"`
 	Usn      int64            `json:"Usn"`
+}
+
+type HistoryListResponse struct {
+	Ok   bool                 `json:"Ok"`
+	Msg  string               `json:"Msg"`
+	Item []models.HistoryMeta `json:"Item"`
+}
+
+type HistoryContentResponse struct {
+	Ok   bool                 `json:"Ok"`
+	Msg  string               `json:"Msg"`
+	Item *models.HistoryEntry `json:"Item"`
+}
+
+// GetHistories returns history metadata. The server intentionally does not
+// include the (potentially large) content in this response.
+func (c *Client) GetHistories(noteID string) ([]models.HistoryMeta, error) {
+	resp, err := c.get("note/getHistories", map[string]string{"noteId": noteID})
+	if err != nil {
+		return nil, err
+	}
+	var result HistoryListResponse
+	if err := json.Unmarshal(resp.Body(), &result); err != nil {
+		return nil, err
+	}
+	if !result.Ok {
+		return nil, fmt.Errorf("get histories failed: %s", result.Msg)
+	}
+	return result.Item, nil
+}
+
+// GetHistoryContent fetches one history entry. New servers identify versions
+// by the stable historyId; index is retained for old Leanote compatibility.
+func (c *Client) GetHistoryContent(noteID string, index int) (*models.HistoryEntry, error) {
+	return c.GetHistoryContentByID(noteID, "", index)
+}
+
+// GetHistoryContentByID fetches a history entry by stable ID when available.
+// The index fallback is needed for old servers and old local history records.
+func (c *Client) GetHistoryContentByID(noteID, historyID string, index int) (*models.HistoryEntry, error) {
+	params := map[string]string{"noteId": noteID}
+	if historyID != "" {
+		params["historyId"] = historyID
+	} else {
+		params["index"] = strconv.Itoa(index)
+	}
+	resp, err := c.get("note/getHistoryContent", params)
+	if err != nil {
+		return nil, err
+	}
+	var result HistoryContentResponse
+	if err := json.Unmarshal(resp.Body(), &result); err != nil {
+		return nil, err
+	}
+	if !result.Ok {
+		return nil, fmt.Errorf("get history content failed: %s", result.Msg)
+	}
+	return result.Item, nil
 }
 
 func (c *Client) AddNotebook(nb *models.Notebook) (*models.Notebook, error) {

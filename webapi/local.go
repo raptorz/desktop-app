@@ -665,6 +665,12 @@ func (h *Handler) listHistories(w http.ResponseWriter, r *http.Request) {
 			h.fail(w, "sharedHistoryUnsupported")
 			return
 		}
+		if h.Proxy != nil {
+			if histories, ok := h.Proxy.fetchHistories(h.form(r, "noteId")); ok {
+				h.writeJSON(w, histories)
+				return
+			}
+		}
 	}
 	histories, err := h.DB.GetNoteHistories(h.form(r, "noteId"))
 	if err != nil {

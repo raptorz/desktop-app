@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -96,6 +97,14 @@ func (p *ServerProxy) call(method, path string, form url.Values, file *multipart
 		req.Body = io.NopCloser(body)
 		req.ContentLength = int64(body.Len())
 		req.Header.Set("Content-Type", writer.FormDataContentType())
+	} else if form != nil && method == http.MethodGet {
+		query := req.URL.Query()
+		for key, values := range form {
+			for _, value := range values {
+				query.Add(key, value)
+			}
+		}
+		req.URL.RawQuery = query.Encode()
 	} else if form != nil {
 		req.Body = io.NopCloser(strings.NewReader(form.Encode()))
 		req.ContentLength = int64(len(form.Encode()))
@@ -185,6 +194,54 @@ func (p *ServerProxy) checkServerVersion() string {
 }
 
 func (p *ServerProxy) VersionNotice() string { return p.versionNotice }
+
+// fetchHistories retrieves the split history API used by Gemsnote. The bool
+// reports whether the remote response was understood; callers should fall
+// back to the local cache when it is false (for example on old Leanote).
+func (p *ServerProxy) fetchHistories(noteID string) ([]map[string]any, bool) {
+	if !p.configured() || !p.ensureSession() {
+		return nil, false
+	}
+	data, _, err := p.call(http.MethodGet, "/api/note/getHistories", url.Values{"noteId": {noteID}}, nil)
+	if err != nil {
+		return nil, false
+	}
+	var response struct {
+		Ok   bool                 `json:"Ok"`
+		Item []models.HistoryMeta `json:"Item"`
+	}
+	if err := json.Unmarshal(data, &response); err != nil || !response.Ok {
+		return nil, false
+	}
+
+	items := make([]map[string]any, 0, len(response.Item))
+	for _, meta := range response.Item {
+		contentParams := url.Values{"noteId": {noteID}}
+		if meta.ID != "" {
+			contentParams.Set("historyId", meta.ID)
+		} else {
+			// Old Leanote/Gemsnote responses only have an array index.
+			contentParams.Set("index", strconv.Itoa(meta.Index))
+		}
+		contentData, _, err := p.call(http.MethodGet, "/api/note/getHistoryContent", contentParams, nil)
+		if err != nil {
+			return nil, false
+		}
+		var contentResponse struct {
+			Ok   bool                 `json:"Ok"`
+			Item *models.HistoryEntry `json:"Item"`
+		}
+		if err := json.Unmarshal(contentData, &contentResponse); err != nil || !contentResponse.Ok || contentResponse.Item == nil {
+			return nil, false
+		}
+		items = append(items, map[string]any{
+			"Id":          meta.ID,
+			"UpdatedTime": timeOrNow(&contentResponse.Item.UpdatedTime),
+			"Content":     normalizeContent(contentResponse.Item.Content),
+		})
+	}
+	return items, true
+}
 
 func (p *ServerProxy) FetchAPIToken(email, pwd string) string {
 	if !p.configured() {
