@@ -1,6 +1,9 @@
 package models
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 type Note struct {
 	ID             string     `json:"_id"`
@@ -18,6 +21,7 @@ type Note struct {
 	IsTrash        bool       `json:"IsTrash"`
 	IsBlog         bool       `json:"IsBlog"`
 	IsStar         bool       `json:"IsStar"`
+	IsStarPresent  bool       `json:"-"`
 	IsDeleted      bool       `json:"IsDeleted,omitempty"`
 	IsNew          bool       `json:"IsNew,omitempty"`
 	Usn            int64      `json:"Usn"`
@@ -37,6 +41,21 @@ type Note struct {
 	Attachs   []*Attach              `json:"Attachs,omitempty"`
 	Files     []*FileRef             `json:"Files,omitempty"`
 	FileDatas map[string]interface{} `json:"FileDatas,omitempty"`
+}
+
+func (n *Note) UnmarshalJSON(data []byte) error {
+	type plain Note
+	var p plain
+	if err := json.Unmarshal(data, &p); err != nil {
+		return err
+	}
+	*n = Note(p)
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	_, n.IsStarPresent = fields["IsStar"]
+	return nil
 }
 
 type FileRef struct {

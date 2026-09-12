@@ -168,9 +168,29 @@ func (h *Handler) noteListItem(n *models.Note) map[string]any {
 		"NotebookId":  n.NotebookID,
 		"Title":       n.Title,
 		"Desc":        n.Desc,
+		"IsStar":      n.IsStar,
 		"CreatedTime": timeOrNow(n.CreatedTime),
 		"UpdatedTime": timeOrNow(n.UpdatedTime),
 	}
+}
+
+func (h *Handler) star(w http.ResponseWriter, r *http.Request) {
+	user := h.requireUser(w)
+	if user == nil {
+		return
+	}
+	noteID := h.form(r, "noteId")
+	note, err := h.DB.GetNote(noteID)
+	if err != nil || note == nil || note.UserID != user.ID || note.IsTrash || note.IsDeleted || note.LocalIsDelete {
+		h.fail(w, "noAuth")
+		return
+	}
+	starred := h.form(r, "starred") == "true"
+	if err := h.DB.SetStar(noteID, starred); err != nil {
+		h.fail(w, err.Error())
+		return
+	}
+	h.writeJSON(w, map[string]any{"Ok": true, "IsStar": starred})
 }
 
 func (h *Handler) documentNote(n *models.Note) map[string]any {
@@ -356,6 +376,15 @@ func (h *Handler) notes(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		h.fail(w, err.Error())
 		return
+	}
+	if h.form(r, "starred") == "true" {
+		filtered := list[:0]
+		for _, n := range list {
+			if n.IsStar {
+				filtered = append(filtered, n)
+			}
+		}
+		list = filtered
 	}
 	start := (page - 1) * pageSize
 	if start > len(list) {

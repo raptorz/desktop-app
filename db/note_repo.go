@@ -274,12 +274,12 @@ func (d *Database) UpdateNoteForce(note *models.Note, needReloadContent bool) er
 	_, err := d.db.Exec(`
 		UPDATE notes SET
 			title = ?, content = ?, desc = ?, abstract = ?, img_src = ?, tags = ?,
-			is_markdown = ?, is_trash = ?, is_blog = ?, usn = ?,
+			is_markdown = ?, is_trash = ?, is_blog = ?, is_star = ?, usn = ?,
 			is_dirty = 0, content_is_dirty = 0, local_is_new = 0, local_is_delete = 0, init_sync = ?,
 			err = ''
 		WHERE note_id = ?
 	`, note.Title, note.Content, note.Desc, note.Abstract, note.ImgSrc, string(tagsJSON),
-		note.IsMarkdown, note.IsTrash, note.IsBlog, note.Usn, initSync, note.NoteID)
+		note.IsMarkdown, note.IsTrash, note.IsBlog, note.IsStar, note.Usn, initSync, note.NoteID)
 	return err
 }
 
@@ -351,9 +351,18 @@ func (d *Database) MoveNote(noteID, notebookID string) error {
 
 func (d *Database) StarNote(noteID string) error {
 	_, err := d.db.Exec(`
-		UPDATE notes SET is_star = CASE WHEN is_star = 1 THEN 0 ELSE 1 END, updated_time = ?
+		UPDATE notes SET is_star = CASE WHEN is_star = 1 THEN 0 ELSE 1 END, is_dirty = 1, updated_time = ?
 		WHERE note_id = ?
 	`, time.Now().Unix(), noteID)
+	return err
+}
+
+func (d *Database) SetStar(noteID string, starred bool) error {
+	value := 0
+	if starred {
+		value = 1
+	}
+	_, err := d.db.Exec(`UPDATE notes SET is_star = ?, is_dirty = 1, updated_time = ? WHERE note_id = ?`, value, time.Now().Unix(), noteID)
 	return err
 }
 
@@ -405,10 +414,10 @@ func (d *Database) UpdateNoteAfterSync(note *models.Note, isAdd bool) error {
 
 	_, err := d.db.Exec(`
 		UPDATE notes SET
-			server_note_id = ?, usn = ?, title = ?, tags = ?,
+			server_note_id = ?, usn = ?, title = ?, tags = ?, is_star = ?,
 			is_dirty = 0, local_is_new = 0, content_is_dirty = 0, init_sync = 0, err = ''
 		WHERE note_id = ?
-	`, note.ServerNoteID, note.Usn, note.Title, string(tagsJSON), note.NoteID)
+	`, note.ServerNoteID, note.Usn, note.Title, string(tagsJSON), note.IsStar, note.NoteID)
 	return err
 }
 

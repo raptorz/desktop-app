@@ -254,6 +254,9 @@ func (s *SyncService) getNoteFilesForUpload(note *models.Note) ([]*models.FileRe
 }
 
 func (s *SyncService) processNoteAfterSync(localNote *models.Note, serverNote *models.Note, isAdd bool) {
+	if !serverNote.IsStarPresent {
+		serverNote.IsStar = localNote.IsStar
+	}
 	if serverNote.Files != nil {
 		for _, f := range serverNote.Files {
 			if f.IsAttach {

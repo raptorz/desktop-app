@@ -150,6 +150,9 @@ func (s *SyncService) processNoteSync(serverNote *models.Note, syncInfo *models.
 	if localNote.Usn == serverNote.Usn {
 		return nil
 	}
+	if !serverNote.IsStarPresent {
+		serverNote.IsStar = localNote.IsStar
+	}
 
 	if localNote.IsDirty {
 		serverContent, err := s.api.GetNoteContent(serverNote.NoteID)

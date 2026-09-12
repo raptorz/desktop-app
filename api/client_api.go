@@ -290,6 +290,7 @@ func (c *Client) AddNote(note *models.Note) (*models.Note, error) {
 		"IsMarkdown": note.IsMarkdown,
 		"Tags":       note.Tags,
 		"IsBlog":     note.IsBlog,
+		"IsStar":     note.IsStar,
 		"Files":      note.Files,
 		"FileDatas":  note.FileDatas,
 	}
@@ -315,6 +316,7 @@ func (c *Client) UpdateNote(note *models.Note) (*models.Note, error) {
 		"Usn":        note.Usn,
 		"IsTrash":    note.IsTrash,
 		"IsBlog":     note.IsBlog,
+		"IsStar":     note.IsStar,
 		"Tags":       note.Tags,
 		"Files":      note.Files,
 		"FileDatas":  note.FileDatas,

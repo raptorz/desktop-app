@@ -67,6 +67,8 @@ func (h *Handler) route(w http.ResponseWriter, r *http.Request) bool {
 		h.bootstrap(w)
 	case path == "/web/notes":
 		h.notes(w, r)
+	case path == "/web/star":
+		h.star(w, r)
 	case path == "/web/document":
 		h.document(w, r)
 	case path == "/share/listShareNotes":
