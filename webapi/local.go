@@ -132,6 +132,19 @@ func (h *Handler) bootstrap(w http.ResponseWriter) {
 	if tags == nil {
 		tags = []*models.Tag{}
 	}
+	filteredTags := tags[:0]
+	for _, tag := range tags {
+		if tag == nil {
+			continue
+		}
+		if count, countErr := h.DB.CountNotesByTag(user.ID, tag.Tag); countErr == nil {
+			tag.Count = count
+		}
+		if tag.Count > 0 {
+			filteredTags = append(filteredTags, tag)
+		}
+	}
+	tags = filteredTags
 	totalNotes, err := h.DB.CountAllNotes(user.ID)
 	if err != nil {
 		totalNotes = 0
