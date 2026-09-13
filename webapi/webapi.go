@@ -23,7 +23,12 @@ type Handler struct {
 	// OnLogout is called synchronously before the local session is cleared.
 	// Returning an error keeps the session active so local changes are not
 	// discarded when the final sync cannot be completed.
-	OnLogout         func() error
+	OnLogout func() error
+	// OnSync / OnFullSync run a blocking incremental or full sync on behalf of
+	// the SPA's account menu (/web/sync, /web/fullSync). The returned value is
+	// written as the JSON response; a non-nil error becomes {Ok:false,Msg}.
+	OnSync           func() (any, error)
+	OnFullSync       func() (any, error)
 	OnSharedDownload func()
 }
 
@@ -69,6 +74,10 @@ func (h *Handler) route(w http.ResponseWriter, r *http.Request) bool {
 		h.notes(w, r)
 	case path == "/web/star":
 		h.star(w, r)
+	case path == "/web/sync" && method == http.MethodPost:
+		h.syncNow(w, h.OnSync)
+	case path == "/web/fullSync" && method == http.MethodPost:
+		h.syncNow(w, h.OnFullSync)
 	case path == "/web/document":
 		h.document(w, r)
 	case path == "/share/listShareNotes":

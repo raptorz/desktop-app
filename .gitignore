@@ -5,6 +5,9 @@
 # Wails build artifacts
 /leanote
 /frontend/dist/
+/frontend/wailsjs/
 /build/bin/
+/release/
 
 node_modules
+.omo

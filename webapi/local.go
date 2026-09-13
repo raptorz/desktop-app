@@ -936,6 +936,23 @@ func (h *Handler) serveImage(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, path)
 }
 
+func (h *Handler) syncNow(w http.ResponseWriter, onSync func() (any, error)) {
+	user := h.requireUser(w)
+	if user == nil {
+		return
+	}
+	if onSync == nil {
+		h.fail(w, "unsupported")
+		return
+	}
+	result, err := onSync()
+	if err != nil {
+		h.fail(w, err.Error())
+		return
+	}
+	h.writeJSON(w, result)
+}
+
 func (h *Handler) doLogin(w http.ResponseWriter, r *http.Request) {
 	email := h.form(r, "email")
 	pwd := r.FormValue("pwd")
@@ -1009,9 +1026,12 @@ func (h *Handler) adoptServerUser(email, pwd string) {
 	h.DB.SetConfig("proxy:pwd", pwd)
 }
 
+// fireLoginHook runs the initial server snapshot synchronously: the SPA
+// navigates to the workspace as soon as /doLogin responds, so the personal
+// data must already be in the local database or the workspace renders empty.
 func (h *Handler) fireLoginHook() {
 	if h.OnLogin != nil {
-		go h.OnLogin()
+		h.OnLogin()
 	}
 }
 

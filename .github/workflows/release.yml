@@ -1,0 +1,250 @@
+name: Desktop Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing tag to build and release (for example v1.0.0)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: "1.23.x"
+  NODE_VERSION: "22"
+  WAILS_VERSION: "v2.12.0"
+  GEMSNOTE_REPOSITORY: ${{ vars.GEMSNOTE_REPOSITORY || 'gemsnote/gemsnote' }}
+
+jobs:
+  validate:
+    name: Validate release
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      version: ${{ steps.release.outputs.version }}
+
+    steps:
+      - name: Resolve release tag
+        id: release
+        shell: bash
+        env:
+          DISPATCH_TAG: ${{ inputs.release_tag }}
+        run: |
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            tag="${DISPATCH_TAG}"
+          else
+            tag="${GITHUB_REF_NAME}"
+          fi
+          if [[ ! "${tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Release tag must match vMAJOR.MINOR.PATCH: ${tag}" >&2
+            exit 1
+          fi
+          echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
+          echo "version=${tag#v}" >> "${GITHUB_OUTPUT}"
+
+      - name: Check out Gemsnote frontend
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.GEMSNOTE_REPOSITORY }}
+          token: ${{ secrets.GEMSNOTE_REPOSITORY_TOKEN || github.token }}
+          path: gemsnote
+          ref: ${{ steps.release.outputs.tag }}
+          fetch-depth: 1
+
+      - name: Check out desktop tag
+        uses: actions/checkout@v4
+        with:
+          path: gemsnote/desktop-app
+          ref: ${{ steps.release.outputs.tag }}
+          fetch-depth: 1
+
+      - name: Validate client version
+        shell: bash
+        working-directory: gemsnote/desktop-app
+        env:
+          TAG_VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          client_version=$(sed -n 's/^const ClientVersion = "\([^"]*\)"/\1/p' api/version.go)
+          if [[ -z "${client_version}" || "${client_version}" != "${TAG_VERSION}" ]]; then
+            echo "Tag version ${TAG_VERSION} does not match api.ClientVersion ${client_version:-<missing>}" >&2
+            exit 1
+          fi
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: gemsnote/desktop-app/go.sum
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: gemsnote/frontend/package-lock.json
+
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev
+
+      - name: Test shared frontend
+        working-directory: gemsnote/frontend
+        run: |
+          npm ci
+          npm test -- --run
+          npm run build
+
+      - name: Test desktop application
+        working-directory: gemsnote/desktop-app
+        run: go test ./...
+
+  build:
+    name: Build ${{ matrix.asset }}
+    needs: validate
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            platform: linux/amd64
+            asset: linux-amd64
+            archive: tar
+          - runner: ubuntu-24.04-arm
+            platform: linux/arm64
+            asset: linux-arm64
+            archive: tar
+          - runner: macos-15-intel
+            platform: darwin/amd64
+            asset: darwin-amd64
+            archive: app
+          - runner: macos-15
+            platform: darwin/arm64
+            asset: darwin-arm64
+            archive: app
+          - runner: windows-2025
+            platform: windows/amd64
+            asset: windows-amd64
+            archive: zip
+
+    steps:
+      # The desktop repository intentionally reuses the Vue frontend and TinyMCE
+      # assets from the server repository. Keep this checkout as the parent of
+      # desktop-app so build-frontend.sh sees the same layout as local builds.
+      - name: Check out Gemsnote frontend
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.GEMSNOTE_REPOSITORY }}
+          token: ${{ secrets.GEMSNOTE_REPOSITORY_TOKEN || github.token }}
+          path: gemsnote
+          ref: ${{ needs.validate.outputs.tag }}
+          fetch-depth: 1
+
+      - name: Check out desktop tag
+        uses: actions/checkout@v4
+        with:
+          path: gemsnote/desktop-app
+          ref: ${{ needs.validate.outputs.tag }}
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: gemsnote/desktop-app/go.sum
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: gemsnote/frontend/package-lock.json
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev
+
+      - name: Install Wails CLI
+        shell: bash
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@${WAILS_VERSION}
+
+      - name: Build desktop application
+        shell: bash
+        working-directory: gemsnote/desktop-app
+        run: wails build -clean -platform "${{ matrix.platform }}"
+
+      - name: Package Linux application
+        if: matrix.archive == 'tar'
+        shell: bash
+        working-directory: gemsnote/desktop-app
+        run: |
+          mkdir -p release
+          tar -C build/bin -czf "release/gemsnote-${{ needs.validate.outputs.version }}-${{ matrix.asset }}.tar.gz" gemsnote
+
+      - name: Package macOS application
+        if: matrix.archive == 'app'
+        shell: bash
+        working-directory: gemsnote/desktop-app
+        run: |
+          mkdir -p release
+          ditto -c -k --sequesterRsrc --keepParent build/bin/gemsnote.app \
+            "release/gemsnote-${{ needs.validate.outputs.version }}-${{ matrix.asset }}.zip"
+
+      - name: Package Windows application
+        if: matrix.archive == 'zip'
+        shell: pwsh
+        working-directory: gemsnote/desktop-app
+        run: |
+          New-Item -ItemType Directory -Force release | Out-Null
+          Compress-Archive -Path build/bin/gemsnote.exe `
+            -DestinationPath "release/gemsnote-${{ needs.validate.outputs.version }}-${{ matrix.asset }}.zip"
+
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gemsnote-${{ needs.validate.outputs.version }}-${{ matrix.asset }}
+          path: gemsnote/desktop-app/release/*
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: Publish GitHub Release
+    needs: [validate, build]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release
+          pattern: gemsnote-${{ needs.validate.outputs.version }}-*
+          merge-multiple: true
+
+      - name: Generate SHA-256 checksums
+        working-directory: release
+        run: sha256sum gemsnote-* > SHA256SUMS
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+        run: |
+          if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
+            gh release upload "${RELEASE_TAG}" release/* --clobber
+          else
+            gh release create "${RELEASE_TAG}" release/* \
+              --verify-tag \
+              --generate-notes \
+              --title "Gemsnote Desktop ${RELEASE_TAG}"
+          fi

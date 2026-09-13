@@ -318,9 +318,15 @@ func (p *ServerProxy) SharedNotebooks(user *models.User) (map[string]any, bool) 
 	if !p.configured() {
 		return empty, false
 	}
+	if !p.ensureSession() {
+		return empty, false
+	}
 	shared, isAdmin, ok := p.fetchBootstrapSession()
-	if !ok && p.ensureSession() {
-		shared, isAdmin, ok = p.fetchBootstrapSession()
+	if !ok {
+		p.sessionOk = false
+		if p.ensureSession() {
+			shared, isAdmin, ok = p.fetchBootstrapSession()
+		}
 	}
 	if !ok {
 		return empty, false
@@ -336,8 +342,9 @@ func (p *ServerProxy) fetchBootstrapSession() (map[string]any, bool, bool) {
 	var payload struct {
 		SharedNotebooks map[string]any
 		IsAdmin         bool
+		User            *struct{ UserId string }
 	}
-	if json.Unmarshal(data, &payload) != nil {
+	if json.Unmarshal(data, &payload) != nil || payload.User == nil {
 		return nil, false, false
 	}
 	if payload.SharedNotebooks == nil {

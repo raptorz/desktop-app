@@ -262,10 +262,21 @@ func (a *App) GetLastSyncState() map[string]interface{} {
 
 func (a *App) FullSyncForce() map[string]interface{} {
 	err := a.sync.ForceFullSync()
+	result := map[string]interface{}{"Ok": true}
 	if err != nil {
-		return map[string]interface{}{"Ok": false, "Msg": err.Error()}
+		result = map[string]interface{}{"Ok": false, "Msg": err.Error()}
 	}
-	return map[string]interface{}{"Ok": true}
+	a.emitSyncFinished(result)
+	return result
+}
+
+// emitSyncFinished tells the SPA a sync round just ended so it can reload the
+// lists that were rendered from the local database before the sync completed.
+func (a *App) emitSyncFinished(result map[string]interface{}) {
+	if a.ctx == nil {
+		return
+	}
+	runtime.EventsEmit(a.ctx, "sync-finished", result)
 }
 
 // ==================== Notebook Operations ====================
@@ -783,10 +794,12 @@ func (a *App) FullSync() map[string]interface{} {
 func (a *App) IncrSync() map[string]interface{} {
 	info, err := a.sync.IncrSync()
 	if err != nil {
-		return map[string]interface{}{"Ok": false, "Msg": err.Error()}
+		result := map[string]interface{}{"Ok": false, "Msg": err.Error()}
+		a.emitSyncFinished(result)
+		return result
 	}
 
-	return map[string]interface{}{
+	result := map[string]interface{}{
 		"Ok": true,
 		"Notebook": map[string]interface{}{
 			"Adds":          info.Notebook.Adds,
@@ -805,6 +818,8 @@ func (a *App) IncrSync() map[string]interface{} {
 			"Adds": info.Tag.Adds,
 		},
 	}
+	a.emitSyncFinished(result)
+	return result
 }
 
 func (a *App) IsSyncing() bool {

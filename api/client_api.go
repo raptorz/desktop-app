@@ -57,6 +57,34 @@ type LastSyncStateResponse struct {
 	Msg          string `json:"Msg"`
 }
 
+func (s *LastSyncStateResponse) UnmarshalJSON(data []byte) error {
+	var payload struct {
+		Ok           bool            `json:"Ok"`
+		LastSyncUsn  int64           `json:"LastSyncUsn"`
+		LastSyncTime json.RawMessage `json:"LastSyncTime"`
+		Msg          string          `json:"Msg"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return err
+	}
+	var syncTime string
+	if len(payload.LastSyncTime) > 0 && string(payload.LastSyncTime) != "null" {
+		if payload.LastSyncTime[0] == '"' {
+			if err := json.Unmarshal(payload.LastSyncTime, &syncTime); err != nil {
+				return err
+			}
+		} else {
+			var number json.Number
+			if err := json.Unmarshal(payload.LastSyncTime, &number); err != nil {
+				return fmt.Errorf("invalid LastSyncTime: %w", err)
+			}
+			syncTime = number.String()
+		}
+	}
+	s.Ok, s.LastSyncUsn, s.LastSyncTime, s.Msg = payload.Ok, payload.LastSyncUsn, syncTime, payload.Msg
+	return nil
+}
+
 func (c *Client) GetLastSyncState() (*LastSyncStateResponse, error) {
 	resp, err := c.get("user/getSyncState", nil)
 	if err != nil {

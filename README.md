@@ -2,7 +2,7 @@
 
 Gemsnote（珠玑笔记）桌面客户端，基于 Go + Wails v2。离线优先：数据存储在本地 SQLite，通过 USN 增量同步与 gemsnote 服务器保持一致；UI 复用 [gemsnote](https://github.com/gemsnote/gemsnote) 主仓库的 Vue Web 前端。
 
-> 本仓库原为 Leanote Electron 桌面端，已完成向 Wails 的迁移并更名为 Gemsnote，Electron 实现已移除（详见 [docs/WAILS_MIGRATION_GUIDE.md](docs/WAILS_MIGRATION_GUIDE.md)）。
+> 本项目基于 Leanote Electron 桌面端改写。
 
 ## 架构
 

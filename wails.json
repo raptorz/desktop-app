@@ -3,7 +3,7 @@
   "name": "gemsnote",
   "outputfilename": "gemsnote",
   "frontend:install": "echo 'skip'",
-  "frontend:build": "bash build-frontend.sh",
+  "frontend:build": "bash ../build-frontend.sh",
   "frontend:dev:watcher": "echo 'skip'",
   "frontend:dev:serverUrl": "auto",
   "build:tags": "webkit2_41",

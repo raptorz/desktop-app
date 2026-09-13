@@ -1,3 +1,5 @@
+//go:build !bindings
+
 package main
 
 import (
@@ -112,12 +114,11 @@ func main() {
 		Dist:    dist,
 		OnLogin: func() {
 			// A server login must not reuse the previous account's cursors. The
-			// personal full sync runs immediately after authentication while the
-			// shared cache refresh remains independent.
-			go func() {
-				_ = app.sync.ForceFullSync()
-				_ = app.sharedSync.SyncOnce()
-			}()
+			// personal full sync runs synchronously so the first workspace
+			// render already sees the server snapshot; the shared cache refresh
+			// stays independent in the background.
+			_ = app.FullSyncForce()
+			go app.sharedSync.SyncOnce()
 		},
 		OnLogout: func() error {
 			user, _ := database.GetActiveUser()
@@ -126,6 +127,12 @@ func main() {
 			}
 			_, err := app.sync.FullSync()
 			return err
+		},
+		OnSync: func() (any, error) {
+			return app.IncrSync(), nil
+		},
+		OnFullSync: func() (any, error) {
+			return app.FullSyncForce(), nil
 		},
 		OnSharedDownload: func() { go app.sharedSync.DownloadPending() },
 	}

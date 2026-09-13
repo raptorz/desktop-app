@@ -105,6 +105,60 @@ func TestGuestBootstrapAndNotLogin(t *testing.T) {
 	}
 }
 
+func TestSyncEndpoints(t *testing.T) {
+	e := newTestEnv(t)
+
+	_, body := e.post(t, "/web/sync", url.Values{})
+	if !strings.Contains(string(body), "NOTLOGIN") {
+		t.Fatalf("expected NOTLOGIN, got %s", body)
+	}
+
+	e.login(t)
+	synced, fullSynced := false, false
+	e.handler.OnSync = func() (any, error) {
+		synced = true
+		return map[string]any{"Ok": true, "Note": map[string]any{"Adds": 3}}, nil
+	}
+	e.handler.OnFullSync = func() (any, error) {
+		fullSynced = true
+		return nil, fmt.Errorf("offline")
+	}
+
+	_, body = e.get(t, "/web/sync")
+	if synced || !strings.Contains(string(body), "notFound") {
+		t.Fatalf("GET /web/sync must not invoke hook: %s", body)
+	}
+	_, body = e.get(t, "/web/fullSync")
+	if fullSynced || !strings.Contains(string(body), "notFound") {
+		t.Fatalf("GET /web/fullSync must not invoke hook: %s", body)
+	}
+
+	e.handler.OnSync = nil
+	_, body = e.post(t, "/web/sync", url.Values{})
+	if !strings.Contains(string(body), "unsupported") {
+		t.Fatalf("expected unsupported without hook, got %s", body)
+	}
+
+	e.handler.OnSync = func() (any, error) {
+		synced = true
+		return map[string]any{"Ok": true, "Note": map[string]any{"Adds": 3}}, nil
+	}
+	e.handler.OnFullSync = func() (any, error) {
+		fullSynced = true
+		return nil, fmt.Errorf("offline")
+	}
+
+	_, body = e.post(t, "/web/sync", url.Values{})
+	if !synced || !strings.Contains(string(body), `"Adds":3`) {
+		t.Fatalf("incremental sync hook not invoked or wrong body: %s", body)
+	}
+
+	_, body = e.post(t, "/web/fullSync", url.Values{})
+	if !fullSynced || !strings.Contains(string(body), "offline") {
+		t.Fatalf("full sync hook not invoked or wrong body: %s", body)
+	}
+}
+
 func TestSharedBatchWritesAreRejected(t *testing.T) {
 	e := newTestEnv(t)
 	userID, notebookID := e.login(t)
