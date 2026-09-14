@@ -64,9 +64,16 @@ else
   command -v tar >/dev/null 2>&1 || { echo "Required tool not found: tar" >&2; exit 1; }
   command -v zip >/dev/null 2>&1 || { echo "Required tool not found: zip" >&2; exit 1; }
   command -v sha256sum >/dev/null 2>&1 || { echo "Required tool not found: sha256sum" >&2; exit 1; }
-  command -v appimagetool >/dev/null 2>&1 || {
+  case "$host_arch" in
+    amd64) appimage_asset="appimagetool-x86_64.AppImage" ;;
+    arm64) appimage_asset="appimagetool-aarch64.AppImage" ;;
+  esac
+  appimage_tool="$(command -v appimagetool 2>/dev/null || true)"
+  [[ -n "$appimage_tool" ]] || {
     echo "Required tool not found: appimagetool" >&2
-    echo "Install appimagetool from https://github.com/AppImage/appimagetool/releases and add it to PATH." >&2
+    echo "Download ${appimage_asset} from https://github.com/AppImage/appimagetool/releases for this Linux architecture (${host_arch})." >&2
+    echo "Rename it to appimagetool, make it executable, and put it in PATH." >&2
+    echo "Example: mv ${appimage_asset} appimagetool && chmod +x appimagetool" >&2
     exit 1
   }
 fi
@@ -130,7 +137,7 @@ EOF
   (cd "$appdir" && zip -qr "$archive" .)
   appimage="$output_dir/$asset.AppImage"
   rm -f "$appimage"
-  APPIMAGE_EXTRACT_AND_RUN=1 appimagetool "$appdir" "$appimage"
+  APPIMAGE_EXTRACT_AND_RUN=1 "$appimage_tool" "$appdir" "$appimage"
   chmod 0755 "$appimage"
 else
   app="$desktop_dir/build/bin/gemsnote.app"

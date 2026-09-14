@@ -53,7 +53,15 @@ Linux 还需要 `zip`、`sha256sum` 和 `appimagetool`：
 sudo apt-get install build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev
 ```
 
-`appimagetool` 可从其 [GitHub Releases](https://github.com/AppImage/appimagetool/releases) 下载并加入 `PATH`。Linux ZIP 内含 `gemsnote.desktop` 和图标，手动安装时可将程序目录加入 `PATH`，再把 `.desktop` 文件复制到 `~/.local/share/applications/`。
+`appimagetool` 必须下载与 Linux CPU 架构匹配的版本：amd64 下载 `appimagetool-x86_64.AppImage`，arm64 下载 `appimagetool-aarch64.AppImage`。从 [GitHub Releases](https://github.com/AppImage/appimagetool/releases) 下载后，必须重命名为 `appimagetool`、增加可执行权限并放入 `PATH`，例如：
+
+```bash
+mv appimagetool-x86_64.AppImage appimagetool
+chmod +x appimagetool
+sudo mv appimagetool /usr/local/bin/
+```
+
+Linux ZIP 内含 `gemsnote.desktop` 和图标，手动安装时可将程序目录加入 `PATH`，再把 `.desktop` 文件复制到 `~/.local/share/applications/`。
 
 Windows 脚本依赖 PowerShell 和 Git for Windows 提供的 `bash`，因为 Wails 的前端构建钩子会调用 `build-frontend.sh`。
 
