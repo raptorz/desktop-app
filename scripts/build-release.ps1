@@ -54,6 +54,12 @@ if (-not (Test-Path -PathType Leaf $FrontendLock)) {
 if (-not (Test-Path -PathType Container $TinyMceDir)) {
     throw "TinyMCE assets not found at $TinyMceDir"
 }
+if (-not (Test-Path -PathType Leaf (Join-Path $DesktopDir "build\appicon.png"))) {
+    throw "Application icon not found at $(Join-Path $DesktopDir 'build\appicon.png')"
+}
+if (-not (Test-Path -PathType Leaf (Join-Path $DesktopDir "build\windows\icon.ico"))) {
+    throw "Windows application icon not found at $(Join-Path $DesktopDir 'build\windows\icon.ico')"
+}
 
 $VersionFile = Join-Path $DesktopDir "api\version.go"
 $VersionMatch = Select-String -Path $VersionFile -Pattern '^const ClientVersion = "([^"]*)"$'
@@ -80,22 +86,23 @@ Push-Location $DesktopDir
 try {
     & go test ./...
     if ($LASTEXITCODE -ne 0) { throw "desktop tests failed" }
-    & wails build -clean -platform "$Platform/$Arch"
+    & wails build -clean -platform "$Platform/$Arch" --nsis
     if ($LASTEXITCODE -ne 0) { throw "Wails build failed" }
 }
 finally {
     Pop-Location
 }
 
-$Binary = Join-Path $DesktopDir "build\bin\gemsnote.exe"
-if (-not (Test-Path -PathType Leaf $Binary)) {
-    throw "Wails output not found: $Binary"
+$Installer = Get-ChildItem -Path (Join-Path $DesktopDir "build\bin") -Filter "*-installer.exe" -File |
+    Sort-Object LastWriteTime -Descending | Select-Object -First 1
+if (-not $Installer) {
+    throw "NSIS installer not found in $(Join-Path $DesktopDir 'build\bin')"
 }
-$Archive = Join-Path $OutputDir "gemsnote-$Version-$Platform-$Arch.zip"
-Compress-Archive -Path $Binary -DestinationPath $Archive -Force
+$Archive = Join-Path $OutputDir "gemsnote-$Version-$Platform-$Arch-installer.exe"
+Copy-Item -Path $Installer.FullName -Destination $Archive -Force
 
 $ChecksumLines = Get-ChildItem -Path $OutputDir -File |
-    Where-Object { $_.Name -match "^gemsnote-$([regex]::Escape($Version))-.*\.(zip|tar\.gz)$" } |
+    Where-Object { $_.Name -match "^gemsnote-$([regex]::Escape($Version))-.*\.(exe|dmg|AppImage|zip)$" } |
     Sort-Object Name |
     ForEach-Object {
         $Hash = (Get-FileHash -Algorithm SHA256 -Path $_.FullName).Hash.ToLowerInvariant()

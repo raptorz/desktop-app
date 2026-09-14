@@ -115,23 +115,23 @@ jobs:
           - runner: ubuntu-24.04
             platform: linux/amd64
             asset: linux-amd64
-            archive: tar
+            archive: linux
           - runner: ubuntu-24.04-arm
             platform: linux/arm64
             asset: linux-arm64
-            archive: tar
+            archive: linux
           - runner: macos-15-intel
             platform: darwin/amd64
             asset: darwin-amd64
-            archive: app
+            archive: darwin
           - runner: macos-15
             platform: darwin/arm64
             asset: darwin-arm64
-            archive: app
+            archive: darwin
           - runner: windows-2025
             platform: windows/amd64
             asset: windows-amd64
-            archive: zip
+            archive: nsis
 
     steps:
       # The desktop repository intentionally reuses the Vue frontend and TinyMCE
@@ -172,6 +172,18 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev
 
+      - name: Install appimagetool
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          case "$(uname -m)" in
+            x86_64) asset=appimagetool-x86_64.AppImage ;;
+            aarch64) asset=appimagetool-aarch64.AppImage ;;
+            *) echo "Unsupported architecture: $(uname -m)" >&2; exit 1 ;;
+          esac
+          sudo curl -fsSL "https://github.com/AppImage/appimagetool/releases/download/continuous/${asset}" -o /usr/local/bin/appimagetool
+          sudo chmod +x /usr/local/bin/appimagetool
+
       - name: Install Wails CLI
         shell: bash
         run: go install github.com/wailsapp/wails/v2/cmd/wails@${WAILS_VERSION}
@@ -179,33 +191,47 @@ jobs:
       - name: Build desktop application
         shell: bash
         working-directory: gemsnote/desktop-app
-        run: wails build -clean -platform "${{ matrix.platform }}"
+        run: wails build -clean -platform "${{ matrix.platform }}" $([[ "${{ matrix.archive }}" == "nsis" ]] && echo --nsis || true)
 
       - name: Package Linux application
-        if: matrix.archive == 'tar'
+        if: matrix.archive == 'linux'
         shell: bash
         working-directory: gemsnote/desktop-app
         run: |
-          mkdir -p release
-          tar -C build/bin -czf "release/gemsnote-${{ needs.validate.outputs.version }}-${{ matrix.asset }}.tar.gz" gemsnote
+          set -euo pipefail
+          version="${{ needs.validate.outputs.version }}"
+          appdir="$PWD/build/appimage/Gemsnote.AppDir"
+          rm -rf "$appdir"
+          mkdir -p "$appdir/usr/bin" "$appdir/usr/share/applications" "$appdir/usr/share/icons/hicolor/256x256/apps" release
+          cp build/bin/gemsnote "$appdir/usr/bin/gemsnote"
+          chmod 0755 "$appdir/usr/bin/gemsnote"
+          cp build/appicon.png "$appdir/gemsnote.png"
+          cp build/appicon.png "$appdir/usr/share/icons/hicolor/256x256/apps/gemsnote.png"
+          printf '%s\n' '#!/bin/sh' 'HERE="$(dirname "$(readlink -f "$0")")"' 'exec "$HERE/usr/bin/gemsnote" "$@"' > "$appdir/AppRun"
+          chmod 0755 "$appdir/AppRun"
+          printf '%s\n' '[Desktop Entry]' 'Type=Application' 'Name=Gemsnote' 'Comment=珠玑笔记' 'Exec=gemsnote' 'Icon=gemsnote' 'Categories=Office;Utility;' 'Terminal=false' > "$appdir/gemsnote.desktop"
+          cp "$appdir/gemsnote.desktop" "$appdir/usr/share/applications/gemsnote.desktop"
+          (cd "$appdir" && zip -qr "$GITHUB_WORKSPACE/gemsnote/desktop-app/release/gemsnote-${version}-${{ matrix.asset }}.zip" .)
+          APPIMAGE_EXTRACT_AND_RUN=1 appimagetool "$appdir" "release/gemsnote-${version}-${{ matrix.asset }}.AppImage"
 
       - name: Package macOS application
-        if: matrix.archive == 'app'
+        if: matrix.archive == 'darwin'
         shell: bash
         working-directory: gemsnote/desktop-app
         run: |
           mkdir -p release
-          ditto -c -k --sequesterRsrc --keepParent build/bin/gemsnote.app \
-            "release/gemsnote-${{ needs.validate.outputs.version }}-${{ matrix.asset }}.zip"
+          hdiutil create -volname "Gemsnote ${{ needs.validate.outputs.version }}" -srcfolder build/bin/gemsnote.app -ov -format UDZO \
+            "release/gemsnote-${{ needs.validate.outputs.version }}-${{ matrix.asset }}.dmg"
 
       - name: Package Windows application
-        if: matrix.archive == 'zip'
+        if: matrix.archive == 'nsis'
         shell: pwsh
         working-directory: gemsnote/desktop-app
         run: |
           New-Item -ItemType Directory -Force release | Out-Null
-          Compress-Archive -Path build/bin/gemsnote.exe `
-            -DestinationPath "release/gemsnote-${{ needs.validate.outputs.version }}-${{ matrix.asset }}.zip"
+          $installer = Get-ChildItem build/bin -Filter '*-installer.exe' | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (-not $installer) { throw 'NSIS installer not found' }
+          Copy-Item $installer.FullName "release/gemsnote-${{ needs.validate.outputs.version }}-${{ matrix.asset }}-installer.exe"
 
       - name: Upload release artifact
         uses: actions/upload-artifact@v4

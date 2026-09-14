@@ -27,6 +27,9 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
+//go:embed build/appicon.png
+var appIcon []byte
+
 func getDataPath() string {
 	homeDir, _ := os.UserHomeDir()
 	switch runtime.GOOS {
@@ -168,6 +171,7 @@ func main() {
 		},
 		Linux: &linux.Options{
 			ProgramName: "Gemsnote",
+			Icon:        appIcon,
 		},
 		Mac: &mac.Options{
 			TitleBar: mac.TitleBarHiddenInset(),

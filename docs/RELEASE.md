@@ -17,11 +17,11 @@ gemsnote/
 
 | 平台 | 构建宿主 | 产物 |
 | --- | --- | --- |
-| Linux amd64 | Linux amd64 | `gemsnote-<version>-linux-amd64.tar.gz` |
-| Linux arm64 | Linux arm64 | `gemsnote-<version>-linux-arm64.tar.gz` |
-| macOS amd64 | Intel macOS | `gemsnote-<version>-darwin-amd64.zip` |
-| macOS arm64 | Apple Silicon macOS | `gemsnote-<version>-darwin-arm64.zip` |
-| Windows amd64 | Windows amd64 | `gemsnote-<version>-windows-amd64.zip` |
+| Linux amd64 | Linux amd64 | `gemsnote-<version>-linux-amd64.zip`、`gemsnote-<version>-linux-amd64.AppImage` |
+| Linux arm64 | Linux arm64 | `gemsnote-<version>-linux-arm64.zip`、`gemsnote-<version>-linux-arm64.AppImage` |
+| macOS amd64 | Intel macOS | `gemsnote-<version>-darwin-amd64.dmg` |
+| macOS arm64 | Apple Silicon macOS | `gemsnote-<version>-darwin-arm64.dmg` |
+| Windows amd64 | Windows amd64 | `gemsnote-<version>-windows-amd64-installer.exe`（NSIS） |
 
 每次构建还会更新输出目录中的 `SHA256SUMS`，其中只包含当前版本的全部平台产物，不会混入同一目录中的旧版本。
 
@@ -47,11 +47,13 @@ $env:Path = "$(go env GOPATH)\bin;$env:Path"
 
 将该目录加入系统或用户的永久 `PATH` 后，新打开的终端也可以直接运行 `wails version`。
 
-Linux 还需要：
+Linux 还需要 `zip`、`sha256sum` 和 `appimagetool`：
 
 ```bash
 sudo apt-get install build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev
 ```
+
+`appimagetool` 可从其 [GitHub Releases](https://github.com/AppImage/appimagetool/releases) 下载并加入 `PATH`。Linux ZIP 内含 `gemsnote.desktop` 和图标，手动安装时可将程序目录加入 `PATH`，再把 `.desktop` 文件复制到 `~/.local/share/applications/`。
 
 Windows 脚本依赖 PowerShell 和 Git for Windows 提供的 `bash`，因为 Wails 的前端构建钩子会调用 `build-frontend.sh`。
 
@@ -95,6 +97,8 @@ scripts/build-release.sh <version> [linux|darwin] [amd64|arm64] [absolute-output
 4. 执行 Desktop 全量 Go 测试；
 5. 使用 Wails 在宿主平台原生构建；
 6. 打包产物并更新 SHA-256 校验文件。
+
+Linux 会同时生成带 `.desktop` 和图标的 ZIP 以及 AppImage；macOS 会将 `.app` 制作为 DMG；Windows 会使用 Wails 的 NSIS 模板生成安装器 EXE。Windows 不生成 MSI。
 
 macOS 发布给其他用户前还应完成应用签名和 Apple notarization；Windows 正式分发可进一步增加 Authenticode 签名或 NSIS 安装包。这些签名材料不应写入仓库。
 

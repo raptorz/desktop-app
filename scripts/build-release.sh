@@ -58,14 +58,23 @@ command -v wails >/dev/null 2>&1 || {
   exit 1
 }
 if [[ "$platform" == "darwin" ]]; then
-  command -v ditto >/dev/null 2>&1 || { echo "Required tool not found: ditto" >&2; exit 1; }
+  command -v hdiutil >/dev/null 2>&1 || { echo "Required tool not found: hdiutil" >&2; exit 1; }
+  command -v shasum >/dev/null 2>&1 || { echo "Required tool not found: shasum" >&2; exit 1; }
 else
   command -v tar >/dev/null 2>&1 || { echo "Required tool not found: tar" >&2; exit 1; }
+  command -v zip >/dev/null 2>&1 || { echo "Required tool not found: zip" >&2; exit 1; }
   command -v sha256sum >/dev/null 2>&1 || { echo "Required tool not found: sha256sum" >&2; exit 1; }
+  command -v appimagetool >/dev/null 2>&1 || {
+    echo "Required tool not found: appimagetool" >&2
+    echo "Install appimagetool from https://github.com/AppImage/appimagetool/releases and add it to PATH." >&2
+    exit 1
+  }
 fi
 
 [[ -f "$source_root/frontend/package-lock.json" ]] || { echo "Shared frontend not found at $source_root/frontend" >&2; exit 1; }
 [[ -d "$source_root/public/tinymce" ]] || { echo "TinyMCE assets not found at $source_root/public/tinymce" >&2; exit 1; }
+[[ -f "$desktop_dir/build/appicon.png" ]] || { echo "Application icon not found: $desktop_dir/build/appicon.png" >&2; exit 1; }
+[[ -f "$desktop_dir/build/windows/icon.ico" ]] || { echo "Windows application icon not found: $desktop_dir/build/windows/icon.ico" >&2; exit 1; }
 
 client_version="$(sed -n 's/^const ClientVersion = "\([^"]*\)"/\1/p' "$desktop_dir/api/version.go")"
 if [[ -z "$client_version" || "$client_version" != "$version" ]]; then
@@ -92,22 +101,50 @@ asset="gemsnote-$version-$platform-$arch"
 if [[ "$platform" == "linux" ]]; then
   binary="$desktop_dir/build/bin/gemsnote"
   [[ -f "$binary" ]] || { echo "Wails output not found: $binary" >&2; exit 1; }
-  archive="$output_dir/$asset.tar.gz"
+  appdir="$desktop_dir/build/appimage/Gemsnote.AppDir"
+  rm -rf "$appdir"
+  mkdir -p "$appdir/usr/bin" "$appdir/usr/share/applications" "$appdir/usr/share/icons/hicolor/256x256/apps"
+  cp "$binary" "$appdir/usr/bin/gemsnote"
+  chmod 0755 "$appdir/usr/bin/gemsnote"
+  cp "$desktop_dir/build/appicon.png" "$appdir/gemsnote.png"
+  cp "$desktop_dir/build/appicon.png" "$appdir/usr/share/icons/hicolor/256x256/apps/gemsnote.png"
+  cat > "$appdir/AppRun" <<'EOF'
+#!/bin/sh
+HERE="$(dirname "$(readlink -f "$0")")"
+exec "$HERE/usr/bin/gemsnote" "$@"
+EOF
+  chmod 0755 "$appdir/AppRun"
+  cat > "$appdir/gemsnote.desktop" <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=Gemsnote
+Comment=珠玑笔记
+Exec=gemsnote
+Icon=gemsnote
+Categories=Office;Utility;
+Terminal=false
+EOF
+  cp "$appdir/gemsnote.desktop" "$appdir/usr/share/applications/gemsnote.desktop"
+  archive="$output_dir/$asset.zip"
   rm -f "$archive"
-  tar -C "$desktop_dir/build/bin" -czf "$archive" gemsnote
+  (cd "$appdir" && zip -qr "$archive" .)
+  appimage="$output_dir/$asset.AppImage"
+  rm -f "$appimage"
+  APPIMAGE_EXTRACT_AND_RUN=1 appimagetool "$appdir" "$appimage"
+  chmod 0755 "$appimage"
 else
   app="$desktop_dir/build/bin/gemsnote.app"
   [[ -d "$app" ]] || { echo "Wails output not found: $app" >&2; exit 1; }
-  archive="$output_dir/$asset.zip"
+  archive="$output_dir/$asset.dmg"
   rm -f "$archive"
-  ditto -c -k --sequesterRsrc --keepParent "$app" "$archive"
+  hdiutil create -volname "Gemsnote $version" -srcfolder "$app" -ov -format UDZO "$archive" >/dev/null
 fi
 
 checksum_file="$output_dir/SHA256SUMS"
 if [[ "$platform" == "linux" ]]; then
-  (cd "$output_dir" && sha256sum "gemsnote-$version-"*.tar.gz "gemsnote-$version-"*.zip 2>/dev/null | sort > SHA256SUMS.tmp) || true
+  (cd "$output_dir" && sha256sum "gemsnote-$version-"*.AppImage "gemsnote-$version-"*.zip 2>/dev/null | sort > SHA256SUMS.tmp) || true
 else
-  (cd "$output_dir" && for file in "gemsnote-$version-"*.tar.gz "gemsnote-$version-"*.zip; do
+  (cd "$output_dir" && for file in "gemsnote-$version-"*.dmg; do
     [[ -f "$file" ]] && shasum -a 256 "$file"
   done | sort > SHA256SUMS.tmp)
 fi
