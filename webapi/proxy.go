@@ -267,14 +267,24 @@ func (p *ServerProxy) fetchServerUser() *models.User {
 		return nil
 	}
 	var payload struct {
-		User struct {
+		IsAdmin bool
+		User    struct {
 			UserId   string
 			Username string
 			Email    string
+			Logo     string
 		}
 	}
 	if json.Unmarshal(data, &payload) != nil || payload.User.UserId == "" {
 		return nil
+	}
+	p.DB.SetConfig(adminCacheKey(p.host(), payload.User.UserId), strconv.FormatBool(payload.IsAdmin))
+	logo := strings.TrimSpace(payload.User.Logo)
+	if strings.HasPrefix(logo, "/") {
+		logo = strings.TrimRight(p.host(), "/") + logo
+	}
+	if logo != "" {
+		p.DB.SetConfig("logo:"+payload.User.UserId, logo)
 	}
 	return &models.User{
 		ID:       payload.User.UserId,
@@ -285,14 +295,32 @@ func (p *ServerProxy) fetchServerUser() *models.User {
 }
 
 func (p *ServerProxy) ensureSession() bool {
+	ok, _ := p.ensureSessionStatus()
+	return ok
+}
+
+func (p *ServerProxy) ensureSessionStatus() (bool, string) {
 	if p.sessionOk {
-		return true
+		return true, ""
 	}
 	if p.email == "" || p.pwd == "" {
+		return false, "NOTLOGIN"
+	}
+	ok, msg := p.LoginServer(p.email, p.pwd)
+	return ok, msg
+}
+
+func adminCacheKey(host, userID string) string {
+	return "proxy:is_admin:" + db.SharedAccountID(host, userID)
+}
+
+func (p *ServerProxy) CachedIsAdmin(user *models.User) bool {
+	if user == nil {
 		return false
 	}
-	ok, _ := p.LoginServer(p.email, p.pwd)
-	return ok
+	value, _ := p.DB.GetConfig(adminCacheKey(user.Host, user.ID))
+	admin, _ := strconv.ParseBool(value)
+	return admin
 }
 
 func (p *ServerProxy) GuestConfig() (openRegister, needCaptcha bool) {
@@ -331,6 +359,9 @@ func (p *ServerProxy) SharedNotebooks(user *models.User) (map[string]any, bool) 
 	if !ok {
 		return empty, false
 	}
+	if user != nil {
+		p.DB.SetConfig(adminCacheKey(user.Host, user.ID), strconv.FormatBool(isAdmin))
+	}
 	return shared, isAdmin
 }
 
@@ -357,9 +388,11 @@ func (p *ServerProxy) fetchBootstrapSession() (map[string]any, bool, bool) {
 }
 
 func (p *ServerProxy) Logout() {
-	if p.configured() {
-		p.call(http.MethodGet, "/logout", nil, nil)
-	}
+	// Logout is deliberately local. The desktop session cookie is private to
+	// this client, so replacing its jar invalidates it without making logout
+	// depend on the remote server being reachable.
+	jar, _ := cookiejar.New(nil)
+	p.client.Jar = jar
 	p.sessionOk = false
 	// Credentials are only a session aid for reconnecting while logged in.
 	// Keeping them after logout would let a later proxied request silently
@@ -436,8 +469,11 @@ func (h *Handler) routeProxied(w http.ResponseWriter, r *http.Request) bool {
 		return h.proxyUpdatePwd(w, r)
 	}
 
-	if !proxy.ensureSession() {
-		h.writeJSON(w, map[string]any{"Ok": false, "Msg": "NOTLOGIN"})
+	if ok, msg := proxy.ensureSessionStatus(); !ok {
+		if msg == "" {
+			msg = "NOTLOGIN"
+		}
+		h.writeJSON(w, map[string]any{"Ok": false, "Msg": msg})
 		return true
 	}
 	return proxy.Forward(w, r, r.Form, nil)

@@ -148,6 +148,12 @@ func (s *SyncService) processNoteSync(serverNote *models.Note, syncInfo *models.
 	}
 
 	if localNote.Usn == serverNote.Usn {
+		// Older desktop builds could erase cached content while applying a
+		// metadata-only update (for example, changing IsStar). A forced full
+		// sync must be able to repair those already-corrupted cache rows.
+		if localNote.Content == "" && localNote.ServerNoteID != "" {
+			s.syncNoteContentAndFiles(localNote)
+		}
 		return nil
 	}
 	if !serverNote.IsStarPresent {
@@ -179,7 +185,7 @@ func (s *SyncService) processNoteSync(serverNote *models.Note, syncInfo *models.
 	}
 
 	err = s.db.UpdateNoteForce(serverNote, true)
-	if err == nil && serverNote.InitSync {
+	if err == nil && (serverNote.InitSync || localNote.Content == "") {
 		s.syncNoteContentAndFiles(localNote)
 	}
 	return err

@@ -273,12 +273,12 @@ func (d *Database) UpdateNoteForce(note *models.Note, needReloadContent bool) er
 
 	_, err := d.db.Exec(`
 		UPDATE notes SET
-			title = ?, content = ?, desc = ?, abstract = ?, img_src = ?, tags = ?,
+			title = ?, desc = ?, abstract = ?, img_src = ?, tags = ?,
 			is_markdown = ?, is_trash = ?, is_blog = ?, is_star = ?, usn = ?,
 			is_dirty = 0, content_is_dirty = 0, local_is_new = 0, local_is_delete = 0, init_sync = ?,
 			err = ''
 		WHERE note_id = ?
-	`, note.Title, note.Content, note.Desc, note.Abstract, note.ImgSrc, string(tagsJSON),
+	`, note.Title, note.Desc, note.Abstract, note.ImgSrc, string(tagsJSON),
 		note.IsMarkdown, note.IsTrash, note.IsBlog, note.IsStar, note.Usn, initSync, note.NoteID)
 	return err
 }
@@ -381,6 +381,17 @@ func (d *Database) CountNotes(notebookID string) (int, error) {
 		SELECT COUNT(*) FROM notes 
 		WHERE notebook_id = ? AND is_trash = 0 AND (local_is_delete = 0 OR local_is_delete IS NULL)
 	`, notebookID)
+	var count int
+	err := row.Scan(&count)
+	return count, err
+}
+
+func (d *Database) CountStarredNotes(userID string) (int, error) {
+	row := d.db.QueryRow(`
+		SELECT COUNT(*) FROM notes
+		WHERE user_id = ? AND is_star = 1 AND is_trash = 0
+		  AND (local_is_delete = 0 OR local_is_delete IS NULL)
+	`, userID)
 	var count int
 	err := row.Scan(&count)
 	return count, err

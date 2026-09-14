@@ -3,6 +3,7 @@ package webapi
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"mime/multipart"
 	"net/http"
@@ -19,6 +20,10 @@ import (
 	"github.com/gemsnote/gemsnote/service"
 	"github.com/gemsnote/gemsnote/utils"
 )
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
 type testEnv struct {
 	handler *Handler
@@ -194,6 +199,7 @@ func TestNoteLifecycleRoundtrip(t *testing.T) {
 	}
 
 	var boot struct {
+		Desktop   bool
 		Notebooks []struct {
 			NotebookId string
 			Title      string
@@ -202,6 +208,9 @@ func TestNoteLifecycleRoundtrip(t *testing.T) {
 	}
 	_, body := e.get(t, "/web/bootstrap")
 	json.Unmarshal(body, &boot)
+	if !boot.Desktop {
+		t.Fatalf("authenticated bootstrap must identify desktop: %s", body)
+	}
 	if len(boot.Notebooks) != 1 || boot.Notebooks[0].NotebookId != notebookID {
 		t.Fatalf("bootstrap notebooks mismatch: %s", body)
 	}
@@ -504,6 +513,70 @@ func TestLogoutRedirectsToLogin(t *testing.T) {
 	}
 }
 
+func TestDesktopLogoutReturnsJSONAndClearsSession(t *testing.T) {
+	e := newTestEnv(t)
+	e.login(t)
+	code, body := e.post(t, "/web/logout", url.Values{})
+	if code != http.StatusOK || !strings.Contains(string(body), `"Ok":true`) {
+		t.Fatalf("desktop logout response = %d %s", code, body)
+	}
+	if active, _ := e.db.GetActiveUser(); active != nil {
+		t.Fatalf("user still active after desktop logout: %+v", active)
+	}
+}
+
+func TestDesktopLogoutWithoutPendingChangesDoesNotContactServer(t *testing.T) {
+	e := newTestEnv(t)
+	userID := utils.ObjectId()
+	user := &models.User{ID: userID, Username: "remote", Host: "https://offline.example", Token: "token", IsActive: true}
+	if err := e.db.InsertUser(user); err != nil {
+		t.Fatal(err)
+	}
+	e.db.SetCurrentUser(userID)
+	proxy := NewServerProxy(e.db, e.handler.Files)
+	calls := 0
+	proxy.client.Transport = roundTripFunc(func(*http.Request) (*http.Response, error) {
+		calls++
+		return nil, errors.New("offline")
+	})
+	e.handler.Proxy = proxy
+
+	_, body := e.post(t, "/web/logout", url.Values{})
+	if calls != 0 || !strings.Contains(string(body), `"Ok":true`) {
+		t.Fatalf("logout contacted server or failed: calls=%d body=%s", calls, body)
+	}
+}
+
+func TestOfflineRemoteAccountBootstrapUsesCache(t *testing.T) {
+	e := newTestEnv(t)
+	userID := utils.ObjectId()
+	user := &models.User{ID: userID, Username: "remote", Email: "remote@example.test", Host: "https://offline.example", Token: "token", IsActive: true}
+	if err := e.db.InsertUser(user); err != nil {
+		t.Fatal(err)
+	}
+	e.db.SetCurrentUser(userID)
+	e.db.SetConfig("host", user.Host)
+	e.db.SetConfig("proxy:email", user.Email)
+	e.db.SetConfig("proxy:pwd", "secret")
+	e.db.SetConfig(adminCacheKey(user.Host, userID), "true")
+	proxy := NewServerProxy(e.db, e.handler.Files)
+	calls := 0
+	proxy.client.Transport = roundTripFunc(func(*http.Request) (*http.Response, error) {
+		calls++
+		return nil, errors.New("offline")
+	})
+	e.handler.Proxy = proxy
+
+	_, body := e.get(t, "/web/bootstrap")
+	if calls != 0 || !strings.Contains(string(body), `"IsAdmin":true`) {
+		t.Fatalf("bootstrap contacted server or lost cached admin: calls=%d body=%s", calls, body)
+	}
+	_, body = e.post(t, "/web/groups", url.Values{})
+	if calls != 1 || !strings.Contains(string(body), `"Msg":"offline"`) {
+		t.Fatalf("offline account request mismatch: calls=%d body=%s", calls, body)
+	}
+}
+
 func TestRemoteLoginDoesNotUseMatchingLocalAccount(t *testing.T) {
 	e := newTestEnv(t)
 	userID := utils.ObjectId()
@@ -542,5 +615,9 @@ func TestLogoutSyncFailureKeepsSession(t *testing.T) {
 	active, _ := e.db.GetActiveUser()
 	if active == nil || active.Token != "token" {
 		t.Fatalf("session was cleared after failed sync: %+v", active)
+	}
+	_, body = e.post(t, "/web/logout", url.Values{})
+	if !strings.Contains(string(body), `"Msg":"syncFailed"`) {
+		t.Fatalf("desktop logout did not report sync failure: %s", body)
 	}
 }

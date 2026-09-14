@@ -76,6 +76,11 @@ else
     echo "Example: mv ${appimage_asset} appimagetool && chmod +x appimagetool" >&2
     exit 1
   }
+  appimage_runtime_file="${APPIMAGE_RUNTIME_FILE:-}"
+  if [[ -n "$appimage_runtime_file" && ! -f "$appimage_runtime_file" ]]; then
+    echo "AppImage runtime file not found: $appimage_runtime_file" >&2
+    exit 1
+  fi
 fi
 
 [[ -f "$source_root/frontend/package-lock.json" ]] || { echo "Shared frontend not found at $source_root/frontend" >&2; exit 1; }
@@ -128,6 +133,7 @@ Name=Gemsnote
 Comment=珠玑笔记
 Exec=gemsnote
 Icon=gemsnote
+StartupWMClass=gemsnote
 Categories=Office;Utility;
 Terminal=false
 EOF
@@ -137,7 +143,11 @@ EOF
   (cd "$appdir" && zip -qr "$archive" .)
   appimage="$output_dir/$asset.AppImage"
   rm -f "$appimage"
-  APPIMAGE_EXTRACT_AND_RUN=1 "$appimage_tool" "$appdir" "$appimage"
+  appimage_args=()
+  if [[ -n "$appimage_runtime_file" ]]; then
+    appimage_args+=(--runtime-file "$appimage_runtime_file")
+  fi
+  APPIMAGE_EXTRACT_AND_RUN=1 "$appimage_tool" "${appimage_args[@]}" "$appdir" "$appimage"
   chmod 0755 "$appimage"
 else
   app="$desktop_dir/build/bin/gemsnote.app"

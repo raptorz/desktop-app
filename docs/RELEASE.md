@@ -61,6 +61,15 @@ chmod +x appimagetool
 sudo mv appimagetool /usr/local/bin/
 ```
 
+如果 `appimagetool` 无法自动下载 Type 2 runtime，可从 [type2-runtime Releases](https://github.com/AppImage/type2-runtime/releases) 手工下载与构建平台匹配的文件，然后通过 `APPIMAGE_RUNTIME_FILE` 传给构建脚本。amd64 使用 `runtime-x86_64`，arm64 使用 `runtime-aarch64`：
+
+```bash
+APPIMAGE_RUNTIME_FILE=/absolute/path/to/runtime-x86_64 \
+  scripts/build-release.sh 1.0.0 linux amd64
+```
+
+路径必须指向实际 runtime 文件，建议使用绝对路径。脚本会将其作为 `appimagetool --runtime-file` 参数传入，因此构建期间不再需要在线下载 runtime。
+
 Linux ZIP 内含 `gemsnote.desktop` 和图标，手动安装时可将程序目录加入 `PATH`，再把 `.desktop` 文件复制到 `~/.local/share/applications/`。
 
 Windows 脚本依赖 PowerShell 和 Git for Windows 提供的 `bash`，因为 Wails 的前端构建钩子会调用 `build-frontend.sh`。

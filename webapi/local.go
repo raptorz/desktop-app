@@ -149,6 +149,14 @@ func (h *Handler) bootstrap(w http.ResponseWriter) {
 	if err != nil {
 		totalNotes = 0
 	}
+	totalStarred, err := h.DB.CountStarredNotes(user.ID)
+	if err != nil {
+		totalStarred = 0
+	}
+	pendingChanges, err := h.DB.HasPendingChanges(user.ID)
+	if err != nil {
+		pendingChanges = false
+	}
 
 	shared := map[string]any{}
 	isAdmin := false
@@ -159,17 +167,20 @@ func (h *Handler) bootstrap(w http.ResponseWriter) {
 		}
 	}
 	if h.Proxy != nil {
-		_, isAdmin = h.Proxy.SharedNotebooks(user)
+		isAdmin = h.Proxy.CachedIsAdmin(user)
 	}
 
 	h.writeJSON(w, map[string]any{
 		"Ok":              true,
+		"Desktop":         true,
 		"User":            map[string]any{"UserId": user.ID, "Username": user.Username, "Email": user.Email, "Logo": h.userLogo(user.ID)},
 		"IsAdmin":         isAdmin,
 		"Notebooks":       h.DB.MapNotebooks(notebooks),
 		"SharedNotebooks": shared,
 		"Tags":            tags,
 		"TotalNotes":      totalNotes,
+		"TotalStarred":    totalStarred,
+		"PendingChanges":  pendingChanges,
 		"Version":         h.Version,
 		"SharedCache":     h.sharedCacheState(user),
 	})
@@ -1054,10 +1065,25 @@ func (h *Handler) verifyLocalPassword(user *models.User, password string) string
 }
 
 func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
+	if err := h.performLogout(); err != nil {
+		h.fail(w, "syncFailed")
+		return
+	}
+	http.Redirect(w, r, "/login", http.StatusFound)
+}
+
+func (h *Handler) logoutJSON(w http.ResponseWriter) {
+	if err := h.performLogout(); err != nil {
+		h.fail(w, "syncFailed")
+		return
+	}
+	h.ok(w)
+}
+
+func (h *Handler) performLogout() error {
 	if h.OnLogout != nil {
 		if err := h.OnLogout(); err != nil {
-			h.fail(w, "syncFailed")
-			return
+			return err
 		}
 	}
 	if h.Proxy != nil {
@@ -1068,7 +1094,7 @@ func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
 	}
 	h.DB.DeactivateAllUsers()
 	h.DB.SetCurrentUser("")
-	http.Redirect(w, r, "/login", http.StatusFound)
+	return nil
 }
 
 func (h *Handler) queueSharedDownload(w http.ResponseWriter, r *http.Request) {

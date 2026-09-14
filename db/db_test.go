@@ -313,6 +313,36 @@ func TestGetNotes(t *testing.T) {
 	}
 }
 
+func TestUpdateNoteForcePreservesCachedContent(t *testing.T) {
+	database, err := NewInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+
+	if err := database.InsertUser(&models.User{ID: "user1", Username: "tester"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.InsertNotebook(&models.Notebook{ID: "nb1", NotebookID: "nbid1", UserID: "user1", Title: "Notebook"}); err != nil {
+		t.Fatal(err)
+	}
+	note := &models.Note{ID: "n1", NoteID: "nid1", ServerNoteID: "nid1", NotebookID: "nbid1", UserID: "user1", Title: "Before", Content: "cached body", IsStar: false}
+	if err := database.InsertNote(note); err != nil {
+		t.Fatal(err)
+	}
+	remote := &models.Note{NoteID: "nid1", Title: "After", IsStar: true, Usn: 2}
+	if err := database.UpdateNoteForce(remote, true); err != nil {
+		t.Fatal(err)
+	}
+	got, err := database.GetNote("nid1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Content != "cached body" || !got.IsStar || got.Title != "After" {
+		t.Fatalf("metadata sync damaged cached note: %+v", got)
+	}
+}
+
 func TestDeleteNote(t *testing.T) {
 	database, err := NewInMemory()
 	if err != nil {
@@ -340,5 +370,35 @@ func TestDeleteNote(t *testing.T) {
 	}
 	if !got.IsTrash {
 		t.Error("Expected IsTrash to be true")
+	}
+}
+
+func TestHasPendingChanges(t *testing.T) {
+	database, err := NewInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if err := database.InsertUser(&models.User{ID: "user1", Username: "tester"}); err != nil {
+		t.Fatal(err)
+	}
+
+	pending, err := database.HasPendingChanges("user1")
+	if err != nil || pending {
+		t.Fatalf("empty account pending=%v err=%v", pending, err)
+	}
+	if err := database.InsertNotebook(&models.Notebook{ID: "nb1", NotebookID: "nb1", UserID: "user1", Title: "dirty", IsDirty: true}); err != nil {
+		t.Fatal(err)
+	}
+	pending, err = database.HasPendingChanges("user1")
+	if err != nil || !pending {
+		t.Fatalf("dirty account pending=%v err=%v", pending, err)
+	}
+	if err := database.SetNotebookNotDirty("nb1"); err != nil {
+		t.Fatal(err)
+	}
+	pending, err = database.HasPendingChanges("user1")
+	if err != nil || pending {
+		t.Fatalf("clean account pending=%v err=%v", pending, err)
 	}
 }

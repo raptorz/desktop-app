@@ -78,6 +78,8 @@ func (h *Handler) route(w http.ResponseWriter, r *http.Request) bool {
 		h.syncNow(w, h.OnSync)
 	case path == "/web/fullSync" && method == http.MethodPost:
 		h.syncNow(w, h.OnFullSync)
+	case path == "/web/logout" && method == http.MethodPost:
+		h.logoutJSON(w)
 	case path == "/web/document":
 		h.document(w, r)
 	case path == "/share/listShareNotes":

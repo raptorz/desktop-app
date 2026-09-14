@@ -7,6 +7,7 @@
 /frontend/dist/
 /frontend/wailsjs/
 /build/bin/
+/build/appimage/
 /release/
 
 node_modules

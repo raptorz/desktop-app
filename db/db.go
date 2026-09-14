@@ -281,6 +281,26 @@ func (d *Database) UpdateUserSyncState(userID string, state map[string]int64) er
 	return err
 }
 
+// HasPendingChanges reports whether the account has local data that must be
+// uploaded before its login state can be safely cleared.
+func (d *Database) HasPendingChanges(userID string) (bool, error) {
+	var pending bool
+	err := d.db.QueryRow(`
+		SELECT EXISTS(
+			SELECT 1 FROM notebooks WHERE user_id = ? AND is_dirty = 1
+			UNION ALL
+			SELECT 1 FROM notes WHERE user_id = ? AND is_dirty = 1
+			UNION ALL
+			SELECT 1 FROM tags WHERE user_id = ? AND is_dirty = 1
+			UNION ALL
+			SELECT 1 FROM images WHERE user_id = ? AND is_dirty = 1
+			UNION ALL
+			SELECT 1 FROM attachs WHERE user_id = ? AND is_dirty = 1
+		)
+	`, userID, userID, userID, userID, userID).Scan(&pending)
+	return pending, err
+}
+
 func (d *Database) SetUserHasDB(userID string, hasDB bool) error {
 	val := 0
 	if hasDB {

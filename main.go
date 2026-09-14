@@ -128,7 +128,14 @@ func main() {
 			if user == nil || user.IsLocal || user.Host == "" || user.Token == "" {
 				return nil
 			}
-			_, err := app.sync.FullSync()
+			pending, err := database.HasPendingChanges(user.ID)
+			if err != nil {
+				return err
+			}
+			if !pending {
+				return nil
+			}
+			_, err = app.sync.FullSync()
 			return err
 		},
 		OnSync: func() (any, error) {
@@ -170,7 +177,7 @@ func main() {
 			},
 		},
 		Linux: &linux.Options{
-			ProgramName: "Gemsnote",
+			ProgramName: "gemsnote",
 			Icon:        appIcon,
 		},
 		Mac: &mac.Options{
