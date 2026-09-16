@@ -93,7 +93,7 @@ func (e *testEnv) login(t *testing.T) (userID, notebookID string) {
 func TestGuestBootstrapAndNotLogin(t *testing.T) {
 	e := newTestEnv(t)
 
-	_, body := e.get(t, "/web/bootstrap")
+	_, body := e.get(t, "/api2/web/bootstrap")
 	var guest struct {
 		Ok      bool
 		User    any
@@ -104,7 +104,7 @@ func TestGuestBootstrapAndNotLogin(t *testing.T) {
 		t.Fatalf("guest bootstrap mismatch: %s", body)
 	}
 
-	_, body = e.post(t, "/web/notes", url.Values{})
+	_, body = e.post(t, "/api2/web/notes", url.Values{})
 	if !strings.Contains(string(body), "NOTLOGIN") {
 		t.Fatalf("expected NOTLOGIN, got %s", body)
 	}
@@ -113,7 +113,7 @@ func TestGuestBootstrapAndNotLogin(t *testing.T) {
 func TestSyncEndpoints(t *testing.T) {
 	e := newTestEnv(t)
 
-	_, body := e.post(t, "/web/sync", url.Values{})
+	_, body := e.post(t, "/api2/web/sync", url.Values{})
 	if !strings.Contains(string(body), "NOTLOGIN") {
 		t.Fatalf("expected NOTLOGIN, got %s", body)
 	}
@@ -129,17 +129,17 @@ func TestSyncEndpoints(t *testing.T) {
 		return nil, fmt.Errorf("offline")
 	}
 
-	_, body = e.get(t, "/web/sync")
+	_, body = e.get(t, "/api2/web/sync")
 	if synced || !strings.Contains(string(body), "notFound") {
 		t.Fatalf("GET /web/sync must not invoke hook: %s", body)
 	}
-	_, body = e.get(t, "/web/fullSync")
+	_, body = e.get(t, "/api2/web/fullSync")
 	if fullSynced || !strings.Contains(string(body), "notFound") {
 		t.Fatalf("GET /web/fullSync must not invoke hook: %s", body)
 	}
 
 	e.handler.OnSync = nil
-	_, body = e.post(t, "/web/sync", url.Values{})
+	_, body = e.post(t, "/api2/web/sync", url.Values{})
 	if !strings.Contains(string(body), "unsupported") {
 		t.Fatalf("expected unsupported without hook, got %s", body)
 	}
@@ -153,12 +153,12 @@ func TestSyncEndpoints(t *testing.T) {
 		return nil, fmt.Errorf("offline")
 	}
 
-	_, body = e.post(t, "/web/sync", url.Values{})
+	_, body = e.post(t, "/api2/web/sync", url.Values{})
 	if !synced || !strings.Contains(string(body), `"Adds":3`) {
 		t.Fatalf("incremental sync hook not invoked or wrong body: %s", body)
 	}
 
-	_, body = e.post(t, "/web/fullSync", url.Values{})
+	_, body = e.post(t, "/api2/web/fullSync", url.Values{})
 	if !fullSynced || !strings.Contains(string(body), "offline") {
 		t.Fatalf("full sync hook not invoked or wrong body: %s", body)
 	}
@@ -180,7 +180,7 @@ func TestSharedBatchWritesAreRejected(t *testing.T) {
 	}}}, 1); err != nil {
 		t.Fatal(err)
 	}
-	for _, path := range []string{"/note/moveNote", "/note/copyNote", "/note/deleteNote"} {
+	for _, path := range []string{"/api2/note/moveNote", "/api2/note/copyNote", "/api2/note/deleteNote"} {
 		_, body := e.post(t, path, url.Values{"noteIds[0]": {sharedNoteID}, "notebookId": {notebookID}})
 		if !strings.Contains(string(body), "sharedReadOnly") {
 			t.Fatalf("%s accepted shared write: %s", path, body)
@@ -193,7 +193,7 @@ func TestNoteLifecycleRoundtrip(t *testing.T) {
 	userID, notebookID := e.login(t)
 
 	var loginResp map[string]any
-	e.postJSON(t, "/doLogin", url.Values{"email": {"tester"}, "pwd": {"secret"}}, &loginResp)
+	e.postJSON(t, "/api2/doLogin", url.Values{"email": {"tester"}, "pwd": {"secret"}}, &loginResp)
 	if loginResp["Ok"] != true {
 		t.Fatalf("login failed: %v", loginResp)
 	}
@@ -206,7 +206,7 @@ func TestNoteLifecycleRoundtrip(t *testing.T) {
 		}
 		Tags []map[string]any
 	}
-	_, body := e.get(t, "/web/bootstrap")
+	_, body := e.get(t, "/api2/web/bootstrap")
 	json.Unmarshal(body, &boot)
 	if !boot.Desktop {
 		t.Fatalf("authenticated bootstrap must identify desktop: %s", body)
@@ -228,7 +228,7 @@ func TestNoteLifecycleRoundtrip(t *testing.T) {
 		Content  string
 		Writable bool
 	}
-	e.postJSON(t, "/web/save", url.Values{
+	e.postJSON(t, "/api2/web/save", url.Values{
 		"noteId":     {noteID},
 		"notebookId": {notebookID},
 		"title":      {"第一篇"},
@@ -245,7 +245,7 @@ func TestNoteLifecycleRoundtrip(t *testing.T) {
 	}
 
 	var list []map[string]any
-	e.postJSON(t, "/web/notes", url.Values{"notebookId": {notebookID}, "page": {"1"}}, &list)
+	e.postJSON(t, "/api2/web/notes", url.Values{"notebookId": {notebookID}, "page": {"1"}}, &list)
 	if len(list) != 1 || list[0]["NoteId"] != noteID || list[0]["Title"] != "第一篇" {
 		t.Fatalf("notes list mismatch: %v", list)
 	}
@@ -253,7 +253,7 @@ func TestNoteLifecycleRoundtrip(t *testing.T) {
 	var updated struct {
 		Note struct{ Usn int }
 	}
-	e.postJSON(t, "/web/save", url.Values{
+	e.postJSON(t, "/api2/web/save", url.Values{
 		"noteId":  {noteID},
 		"title":   {"第一篇改"},
 		"content": {"# hello2"},
@@ -262,30 +262,30 @@ func TestNoteLifecycleRoundtrip(t *testing.T) {
 	}, &updated)
 
 	var histories []map[string]any
-	e.postJSON(t, "/noteContentHistory/listHistories", url.Values{"noteId": {noteID}}, &histories)
+	e.postJSON(t, "/api2/noteContentHistory/listHistories", url.Values{"noteId": {noteID}}, &histories)
 	if len(histories) != 1 || histories[0]["Content"] != "# hello 世界" {
 		t.Fatalf("history mismatch: %v", histories)
 	}
 
-	_, body = e.post(t, "/web/notes", url.Values{"key": {"hello2"}, "page": {"1"}})
+	_, body = e.post(t, "/api2/web/notes", url.Values{"key": {"hello2"}, "page": {"1"}})
 	if !strings.Contains(string(body), "第一篇改") {
 		t.Fatalf("search failed: %s", body)
 	}
 
-	e.post(t, "/note/deleteNote", url.Values{"noteIds[0]": {noteID}})
+	e.post(t, "/api2/note/deleteNote", url.Values{"noteIds[0]": {noteID}})
 	var trash []map[string]any
-	e.postJSON(t, "/web/notes", url.Values{"trash": {"true"}, "page": {"1"}}, &trash)
+	e.postJSON(t, "/api2/web/notes", url.Values{"trash": {"true"}, "page": {"1"}}, &trash)
 	if len(trash) != 1 {
 		t.Fatalf("trash view mismatch: %v", trash)
 	}
 
-	e.postJSON(t, "/web/restore", url.Values{"noteId": {noteID}}, &loginResp)
+	e.postJSON(t, "/api2/web/restore", url.Values{"noteId": {noteID}}, &loginResp)
 	if loginResp["Ok"] != true {
 		t.Fatalf("restore failed: %v", loginResp)
 	}
 
-	e.post(t, "/note/deleteTrash", url.Values{"noteId": {noteID}})
-	e.postJSON(t, "/web/notes", url.Values{"trash": {"true"}, "page": {"1"}}, &trash)
+	e.post(t, "/api2/note/deleteTrash", url.Values{"noteId": {noteID}})
+	e.postJSON(t, "/api2/web/notes", url.Values{"trash": {"true"}, "page": {"1"}}, &trash)
 	if len(trash) != 0 {
 		t.Fatalf("note still visible after permanent delete: %v", trash)
 	}
@@ -296,13 +296,13 @@ func TestNotebookOperations(t *testing.T) {
 	_, notebookID := e.login(t)
 
 	noteID := utils.ObjectId()
-	e.post(t, "/web/save", url.Values{
+	e.post(t, "/api2/web/save", url.Values{
 		"noteId": {noteID}, "notebookId": {notebookID}, "title": {"keep"}, "content": {"x"}, "isNew": {"true"},
 	})
 
 	var resp map[string]any
 	childID := utils.ObjectId()
-	e.postJSON(t, "/notebook/addNotebook", url.Values{
+	e.postJSON(t, "/api2/notebook/addNotebook", url.Values{
 		"notebookId":       {childID},
 		"title":            {"子笔记本"},
 		"parentNotebookId": {notebookID},
@@ -311,7 +311,7 @@ func TestNotebookOperations(t *testing.T) {
 		t.Fatalf("addNotebook failed: %v", resp)
 	}
 
-	_, body := e.get(t, "/web/bootstrap")
+	_, body := e.get(t, "/api2/web/bootstrap")
 	if !strings.Contains(string(body), "子笔记本") {
 		t.Fatalf("child notebook missing in tree: %s", body)
 	}
@@ -319,12 +319,12 @@ func TestNotebookOperations(t *testing.T) {
 		t.Fatalf("tree nesting missing: %s", body)
 	}
 
-	e.postJSON(t, "/notebook/updateNotebookTitle", url.Values{"notebookId": {childID}, "title": {"改名"}}, &resp)
-	e.postJSON(t, "/notebook/deleteNotebook", url.Values{"notebookId": {notebookID}}, &resp)
+	e.postJSON(t, "/api2/notebook/updateNotebookTitle", url.Values{"notebookId": {childID}, "title": {"改名"}}, &resp)
+	e.postJSON(t, "/api2/notebook/deleteNotebook", url.Values{"notebookId": {notebookID}}, &resp)
 	if resp["Ok"] != false {
 		t.Fatalf("expected delete of non-empty notebook to fail: %v", resp)
 	}
-	e.postJSON(t, "/notebook/deleteNotebook", url.Values{"notebookId": {childID}}, &resp)
+	e.postJSON(t, "/api2/notebook/deleteNotebook", url.Values{"notebookId": {childID}}, &resp)
 	if resp["Ok"] != true {
 		t.Fatalf("deleteNotebook failed: %v", resp)
 	}
@@ -334,7 +334,7 @@ func TestLegacyImageURLRewrite(t *testing.T) {
 	e := newTestEnv(t)
 	_, notebookID := e.login(t)
 	noteID := utils.ObjectId()
-	e.post(t, "/web/save", url.Values{
+	e.post(t, "/api2/web/save", url.Values{
 		"noteId":     {noteID},
 		"notebookId": {notebookID},
 		"title":      {"img"},
@@ -344,8 +344,8 @@ func TestLegacyImageURLRewrite(t *testing.T) {
 	var doc struct {
 		Content string
 	}
-	e.postJSON(t, "/web/document", url.Values{"noteId": {noteID}}, &doc)
-	if !strings.Contains(doc.Content, "/api/file/getImage?fileId=50f1e5f3b3b19d1f13000001") {
+	e.postJSON(t, "/api2/web/document", url.Values{"noteId": {noteID}}, &doc)
+	if !strings.Contains(doc.Content, "/api2/file/getImage?fileId=50f1e5f3b3b19d1f13000001") {
 		t.Fatalf("legacy URL not rewritten: %s", doc.Content)
 	}
 }
@@ -354,7 +354,7 @@ func TestImageUploadAndServe(t *testing.T) {
 	e := newTestEnv(t)
 	_, notebookID := e.login(t)
 	noteID := utils.ObjectId()
-	e.post(t, "/web/save", url.Values{
+	e.post(t, "/api2/web/save", url.Values{
 		"noteId": {noteID}, "notebookId": {notebookID}, "title": {"pic"}, "content": {"x"}, "isNew": {"true"},
 	})
 
@@ -366,7 +366,7 @@ func TestImageUploadAndServe(t *testing.T) {
 	part.Write(payload)
 	writer.Close()
 
-	req := httptest.NewRequest(http.MethodPost, "/file/pasteImage", &buf)
+	req := httptest.NewRequest(http.MethodPost, "/api2/file/pasteImage", &buf)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	rec := httptest.NewRecorder()
 	e.handler.ServeHTTP(rec, req)
@@ -380,7 +380,7 @@ func TestImageUploadAndServe(t *testing.T) {
 		t.Fatalf("pasteImage failed: %s", rec.Body.String())
 	}
 
-	req = httptest.NewRequest(http.MethodGet, "/api/file/getImage?fileId="+upload.Id, nil)
+	req = httptest.NewRequest(http.MethodGet, "/api2/file/getImage?fileId="+upload.Id, nil)
 	rec = httptest.NewRecorder()
 	e.handler.ServeHTTP(rec, req)
 	if rec.Code != 200 || !bytes.Equal(rec.Body.Bytes(), payload) {
@@ -392,7 +392,7 @@ func TestAttachmentRoundtrip(t *testing.T) {
 	e := newTestEnv(t)
 	_, notebookID := e.login(t)
 	noteID := utils.ObjectId()
-	e.post(t, "/web/save", url.Values{
+	e.post(t, "/api2/web/save", url.Values{
 		"noteId": {noteID}, "notebookId": {notebookID}, "title": {"doc"}, "content": {"x"}, "isNew": {"true"},
 	})
 
@@ -403,7 +403,7 @@ func TestAttachmentRoundtrip(t *testing.T) {
 	part.Write([]byte("附件内容"))
 	writer.Close()
 
-	req := httptest.NewRequest(http.MethodPost, "/attach/uploadAttach", &buf)
+	req := httptest.NewRequest(http.MethodPost, "/api2/attach/uploadAttach", &buf)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	rec := httptest.NewRecorder()
 	e.handler.ServeHTTP(rec, req)
@@ -421,24 +421,24 @@ func TestAttachmentRoundtrip(t *testing.T) {
 		Ok   bool
 		List []map[string]any
 	}
-	e.postJSON(t, "/attach/getAttachs", url.Values{"noteId": {noteID}}, &listResp)
+	e.postJSON(t, "/api2/attach/getAttachs", url.Values{"noteId": {noteID}}, &listResp)
 	if !listResp.Ok || len(listResp.List) != 1 || listResp.List[0]["Title"] != "报告.txt" || listResp.List[0]["Size"] == int64(0) {
 		t.Fatalf("getAttachs mismatch: %v", listResp.List)
 	}
 	attachID, _ := listResp.List[0]["AttachId"].(string)
 
-	dl := httptest.NewRequest(http.MethodGet, "/attach/download?attachId="+attachID, nil)
+	dl := httptest.NewRequest(http.MethodGet, "/api2/attach/download?attachId="+attachID, nil)
 	rec = httptest.NewRecorder()
 	e.handler.ServeHTTP(rec, dl)
 	if rec.Code != 200 || !strings.Contains(rec.Header().Get("Content-Disposition"), "attachment") {
 		t.Fatalf("download failed: %d %s", rec.Code, rec.Header().Get("Content-Disposition"))
 	}
 
-	e.postJSON(t, "/attach/deleteAttach", url.Values{"attachId": {attachID}}, &listResp)
+	e.postJSON(t, "/api2/attach/deleteAttach", url.Values{"attachId": {attachID}}, &listResp)
 	if listResp.Ok != true {
 		t.Fatalf("deleteAttach failed: %v", listResp)
 	}
-	e.postJSON(t, "/attach/getAttachs", url.Values{"noteId": {noteID}}, &listResp)
+	e.postJSON(t, "/api2/attach/getAttachs", url.Values{"noteId": {noteID}}, &listResp)
 	if len(listResp.List) != 0 {
 		t.Fatalf("attach still listed: %v", listResp.List)
 	}
@@ -455,36 +455,36 @@ func TestMoveCopyAndPagination(t *testing.T) {
 	for i := 0; i < 150; i++ {
 		id := utils.ObjectId()
 		ids = append(ids, id)
-		e.post(t, "/web/save", url.Values{
+		e.post(t, "/api2/web/save", url.Values{
 			"noteId": {id}, "notebookId": {notebookID}, "title": {"n" + strconv.Itoa(i)}, "content": {"c"}, "isNew": {"true"},
 		})
 	}
 
 	var page1 []map[string]any
-	e.postJSON(t, "/web/notes", url.Values{"notebookId": {notebookID}, "page": {"1"}}, &page1)
+	e.postJSON(t, "/api2/web/notes", url.Values{"notebookId": {notebookID}, "page": {"1"}}, &page1)
 	if len(page1) != 100 {
 		t.Fatalf("page1 size = %d", len(page1))
 	}
 	var page2 []map[string]any
-	e.postJSON(t, "/web/notes", url.Values{"notebookId": {notebookID}, "page": {"2"}}, &page2)
+	e.postJSON(t, "/api2/web/notes", url.Values{"notebookId": {notebookID}, "page": {"2"}}, &page2)
 	if len(page2) != 50 {
 		t.Fatalf("page2 size = %d", len(page2))
 	}
 
 	target := ids[0]
-	e.post(t, "/note/moveNote", url.Values{"noteIds[0]": {target}, "notebookId": {otherID}})
+	e.post(t, "/api2/note/moveNote", url.Values{"noteIds[0]": {target}, "notebookId": {otherID}})
 	var otherNotes []map[string]any
-	e.postJSON(t, "/web/notes", url.Values{"notebookId": {otherID}, "page": {"1"}}, &otherNotes)
+	e.postJSON(t, "/api2/web/notes", url.Values{"notebookId": {otherID}, "page": {"1"}}, &otherNotes)
 	if len(otherNotes) != 1 {
 		t.Fatalf("move failed: %v", otherNotes)
 	}
-	e.postJSON(t, "/web/notes", url.Values{"notebookId": {notebookID}, "page": {"2"}}, &page2)
+	e.postJSON(t, "/api2/web/notes", url.Values{"notebookId": {notebookID}, "page": {"2"}}, &page2)
 	if len(page2) != 49 {
 		t.Fatalf("after move page2=%d, want 49", len(page2))
 	}
 
-	e.post(t, "/note/copyNote", url.Values{"noteIds[0]": {target}, "notebookId": {notebookID}})
-	e.postJSON(t, "/web/notes", url.Values{"notebookId": {notebookID}, "page": {"2"}}, &page2)
+	e.post(t, "/api2/note/copyNote", url.Values{"noteIds[0]": {target}, "notebookId": {notebookID}})
+	e.postJSON(t, "/api2/web/notes", url.Values{"notebookId": {notebookID}, "page": {"2"}}, &page2)
 	if len(page2) != 50 {
 		t.Fatalf("copy failed: page2=%d, want 50", len(page2))
 	}
@@ -492,7 +492,7 @@ func TestMoveCopyAndPagination(t *testing.T) {
 
 func TestSpaFallback(t *testing.T) {
 	e := newTestEnv(t)
-	code, body := e.get(t, "/note/some-deep-link")
+	code, body := e.get(t, "/api2/note/some-deep-link")
 	if code != 200 || !strings.Contains(string(body), "spa") {
 		t.Fatalf("SPA fallback failed: %d %s", code, body)
 	}
@@ -501,13 +501,13 @@ func TestSpaFallback(t *testing.T) {
 func TestLogoutRedirectsToLogin(t *testing.T) {
 	e := newTestEnv(t)
 	e.login(t)
-	req := httptest.NewRequest(http.MethodGet, "/logout", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api2/logout", nil)
 	rec := httptest.NewRecorder()
 	e.handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusFound {
 		t.Fatalf("logout status = %d", rec.Code)
 	}
-	_, body := e.get(t, "/web/bootstrap")
+	_, body := e.get(t, "/api2/web/bootstrap")
 	if !strings.Contains(string(body), `"User":null`) {
 		t.Fatalf("user still active after logout: %s", body)
 	}
@@ -516,7 +516,7 @@ func TestLogoutRedirectsToLogin(t *testing.T) {
 func TestDesktopLogoutReturnsJSONAndClearsSession(t *testing.T) {
 	e := newTestEnv(t)
 	e.login(t)
-	code, body := e.post(t, "/web/logout", url.Values{})
+	code, body := e.post(t, "/api2/web/logout", url.Values{})
 	if code != http.StatusOK || !strings.Contains(string(body), `"Ok":true`) {
 		t.Fatalf("desktop logout response = %d %s", code, body)
 	}
@@ -541,7 +541,7 @@ func TestDesktopLogoutWithoutPendingChangesDoesNotContactServer(t *testing.T) {
 	})
 	e.handler.Proxy = proxy
 
-	_, body := e.post(t, "/web/logout", url.Values{})
+	_, body := e.post(t, "/api2/web/logout", url.Values{})
 	if calls != 0 || !strings.Contains(string(body), `"Ok":true`) {
 		t.Fatalf("logout contacted server or failed: calls=%d body=%s", calls, body)
 	}
@@ -567,11 +567,11 @@ func TestOfflineRemoteAccountBootstrapUsesCache(t *testing.T) {
 	})
 	e.handler.Proxy = proxy
 
-	_, body := e.get(t, "/web/bootstrap")
+	_, body := e.get(t, "/api2/web/bootstrap")
 	if calls != 0 || !strings.Contains(string(body), `"IsAdmin":true`) {
 		t.Fatalf("bootstrap contacted server or lost cached admin: calls=%d body=%s", calls, body)
 	}
-	_, body = e.post(t, "/web/groups", url.Values{})
+	_, body = e.post(t, "/api2/web/groups", url.Values{})
 	if calls != 1 || !strings.Contains(string(body), `"Msg":"offline"`) {
 		t.Fatalf("offline account request mismatch: calls=%d body=%s", calls, body)
 	}
@@ -592,7 +592,7 @@ func TestRemoteLoginDoesNotUseMatchingLocalAccount(t *testing.T) {
 		Ok  bool
 		Msg string
 	}
-	e.postJSON(t, "/doLogin", url.Values{"email": {"same@example.test"}, "pwd": {"secret"}}, &result)
+	e.postJSON(t, "/api2/doLogin", url.Values{"email": {"same@example.test"}, "pwd": {"secret"}}, &result)
 	if result.Ok || result.Msg != "offline" {
 		t.Fatalf("remote login unexpectedly used local account: %+v", result)
 	}
@@ -608,7 +608,7 @@ func TestLogoutSyncFailureKeepsSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.handler.OnLogout = func() error { return fmt.Errorf("sync unavailable") }
-	code, body := e.get(t, "/logout")
+	code, body := e.get(t, "/api2/logout")
 	if code != http.StatusOK || !strings.Contains(string(body), "syncFailed") {
 		t.Fatalf("logout did not report sync failure: %d %s", code, body)
 	}
@@ -616,7 +616,7 @@ func TestLogoutSyncFailureKeepsSession(t *testing.T) {
 	if active == nil || active.Token != "token" {
 		t.Fatalf("session was cleared after failed sync: %+v", active)
 	}
-	_, body = e.post(t, "/web/logout", url.Values{})
+	_, body = e.post(t, "/api2/web/logout", url.Values{})
 	if !strings.Contains(string(body), `"Msg":"syncFailed"`) {
 		t.Fatalf("desktop logout did not report sync failure: %s", body)
 	}

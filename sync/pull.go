@@ -13,7 +13,7 @@ import (
 )
 
 var imageFileIDRe = regexp.MustCompile(`fileId=([a-zA-Z0-9]{24})`)
-var serverImageRe = regexp.MustCompile(`(https?://[^\s"']+)/api/file/getImage\?fileId=([a-zA-Z0-9]{24})`)
+var serverImageRe = regexp.MustCompile(`(https?://[^\s"']+)/api2/file/getImage\?fileId=([a-zA-Z0-9]{24})`)
 
 func (s *SyncService) syncNotebooks(afterUsn int64, syncInfo *models.SyncInfo) error {
 	logrus.Info("Syncing notebooks...")
@@ -54,6 +54,18 @@ func (s *SyncService) syncNotebooks(afterUsn int64, syncInfo *models.SyncInfo) e
 }
 
 func (s *SyncService) processNotebookSync(serverNb *models.Notebook, syncInfo *models.SyncInfo) error {
+	if serverNb == nil {
+		return nil
+	}
+	// Keep parent references local while retaining ServerNotebookID for
+	// uploads. The server sends ParentNotebookId values in its own ID space.
+	if serverNb.ParentNotebookID != "" {
+		if localParent, err := s.db.GetNotebookIDByServerID(serverNb.ParentNotebookID); err == nil && localParent != "" {
+			copyNb := *serverNb
+			copyNb.ParentNotebookID = localParent
+			serverNb = &copyNb
+		}
+	}
 	if serverNb.IsDeleted {
 		localID, _ := s.db.GetLocalNoteID(serverNb.NotebookID)
 		if localID != "" {
@@ -204,7 +216,7 @@ func (s *SyncService) syncNoteContentAndFiles(note *models.Note) {
 
 	user, _ := s.db.GetActiveUser()
 	if user != nil && user.Host != "" {
-		localPrefix := "/api/file/getImage"
+		localPrefix := "/api2/file/getImage"
 		content = utils.FixNoteContent(content, user.Host, localPrefix)
 	}
 

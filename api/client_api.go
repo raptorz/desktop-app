@@ -256,6 +256,84 @@ type APIResponse struct {
 	Usn      int64            `json:"Usn"`
 }
 
+// checkAPIResponse turns the server's {Ok:false, Msg:...} response into an
+// error.  The old client callers all treat a nil model as success, which can
+// leave a local note dirty while the UI reports that sync completed.
+func checkAPIResponse(resp *APIResponse, operation string) error {
+	if resp == nil {
+		return fmt.Errorf("%s failed: empty response", operation)
+	}
+	if !resp.Ok {
+		if resp.Msg == "" {
+			return fmt.Errorf("%s failed", operation)
+		}
+		return fmt.Errorf("%s failed: %s", operation, resp.Msg)
+	}
+	return nil
+}
+
+func decodeNoteResponse(body []byte, operation string) (*models.Note, error) {
+	var envelope struct {
+		Ok   *bool        `json:"Ok"`
+		Msg  string       `json:"Msg"`
+		Note *models.Note `json:"Note"`
+	}
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		return nil, err
+	}
+	if envelope.Ok != nil {
+		if !*envelope.Ok {
+			if envelope.Msg == "" {
+				return nil, fmt.Errorf("%s failed", operation)
+			}
+			return nil, fmt.Errorf("%s failed: %s", operation, envelope.Msg)
+		}
+		if envelope.Note == nil {
+			return nil, fmt.Errorf("%s failed: missing note", operation)
+		}
+		return envelope.Note, nil
+	}
+	var note models.Note
+	if err := json.Unmarshal(body, &note); err != nil {
+		return nil, err
+	}
+	if note.NoteID == "" {
+		return nil, fmt.Errorf("%s failed: missing note", operation)
+	}
+	return &note, nil
+}
+
+func decodeNotebookResponse(body []byte, operation string) (*models.Notebook, error) {
+	var envelope struct {
+		Ok       *bool            `json:"Ok"`
+		Msg      string           `json:"Msg"`
+		Notebook *models.Notebook `json:"Notebook"`
+	}
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		return nil, err
+	}
+	if envelope.Ok != nil {
+		if !*envelope.Ok {
+			if envelope.Msg == "" {
+				return nil, fmt.Errorf("%s failed", operation)
+			}
+			return nil, fmt.Errorf("%s failed: %s", operation, envelope.Msg)
+		}
+		if envelope.Notebook == nil {
+			return nil, fmt.Errorf("%s failed: missing notebook", operation)
+		}
+		return envelope.Notebook, nil
+	}
+	var notebook models.Notebook
+	if err := json.Unmarshal(body, &notebook); err != nil {
+		return nil, err
+	}
+	if notebook.NotebookID == "" {
+		return nil, fmt.Errorf("%s failed: missing notebook", operation)
+	}
+	return &notebook, nil
+}
+
 type HistoryListResponse struct {
 	Ok   bool                 `json:"Ok"`
 	Msg  string               `json:"Msg"`
@@ -315,7 +393,7 @@ func (c *Client) GetHistoryContentByID(noteID, historyID string, index int) (*mo
 }
 
 func (c *Client) AddNotebook(nb *models.Notebook) (*models.Notebook, error) {
-	resp, err := c.post("notebook/addNotebook", map[string]string{
+	resp, err := c.post("client/notebook/add", map[string]string{
 		"title":            nb.Title,
 		"seq":              strconv.Itoa(int(nb.Seq)),
 		"parentNotebookId": nb.ParentNotebookID,
@@ -324,16 +402,11 @@ func (c *Client) AddNotebook(nb *models.Notebook) (*models.Notebook, error) {
 		return nil, err
 	}
 
-	var apiResp APIResponse
-	if err := json.Unmarshal(resp.Body(), &apiResp); err != nil {
-		return nil, err
-	}
-
-	return apiResp.Notebook, nil
+	return decodeNotebookResponse(resp.Body(), "add notebook")
 }
 
 func (c *Client) UpdateNotebook(nb *models.Notebook) (*models.Notebook, error) {
-	resp, err := c.post("notebook/updateNotebook", map[string]string{
+	resp, err := c.post("client/notebook/update", map[string]string{
 		"notebookId":       nb.ServerNotebookID,
 		"title":            nb.Title,
 		"usn":              strconv.FormatInt(nb.Usn, 10),
@@ -344,16 +417,11 @@ func (c *Client) UpdateNotebook(nb *models.Notebook) (*models.Notebook, error) {
 		return nil, err
 	}
 
-	var apiResp APIResponse
-	if err := json.Unmarshal(resp.Body(), &apiResp); err != nil {
-		return nil, err
-	}
-
-	return apiResp.Notebook, nil
+	return decodeNotebookResponse(resp.Body(), "update notebook")
 }
 
 func (c *Client) DeleteNotebook(nb *models.Notebook) (*APIResponse, error) {
-	resp, err := c.post("notebook/deleteNotebook", map[string]string{
+	resp, err := c.post("client/notebook/delete", map[string]string{
 		"notebookId": nb.ServerNotebookID,
 		"usn":        strconv.FormatInt(nb.Usn, 10),
 	}, nil)
@@ -364,6 +432,9 @@ func (c *Client) DeleteNotebook(nb *models.Notebook) (*APIResponse, error) {
 	var apiResp APIResponse
 	if err := json.Unmarshal(resp.Body(), &apiResp); err != nil {
 		return nil, err
+	}
+	if err := checkAPIResponse(&apiResp, "delete notebook"); err != nil {
+		return &apiResp, err
 	}
 
 	return &apiResp, nil
@@ -382,17 +453,12 @@ func (c *Client) AddNote(note *models.Note) (*models.Note, error) {
 		"FileDatas":  note.FileDatas,
 	}
 
-	resp, err := c.post("note/addNote", data, nil)
+	resp, err := c.post("client/note/add", data, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	var apiResp APIResponse
-	if err := json.Unmarshal(resp.Body(), &apiResp); err != nil {
-		return nil, err
-	}
-
-	return apiResp.Note, nil
+	return decodeNoteResponse(resp.Body(), "add note")
 }
 
 func (c *Client) UpdateNote(note *models.Note) (*models.Note, error) {
@@ -416,21 +482,16 @@ func (c *Client) UpdateNote(note *models.Note) (*models.Note, error) {
 		}
 	}
 
-	resp, err := c.post("note/updateNote", data, nil)
+	resp, err := c.post("client/note/update", data, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	var apiResp APIResponse
-	if err := json.Unmarshal(resp.Body(), &apiResp); err != nil {
-		return nil, err
-	}
-
-	return apiResp.Note, nil
+	return decodeNoteResponse(resp.Body(), "update note")
 }
 
 func (c *Client) DeleteTrash(note *models.Note) (*APIResponse, error) {
-	resp, err := c.post("note/deleteTrash", map[string]string{
+	resp, err := c.post("client/note/deleteTrash", map[string]string{
 		"noteId": note.ServerNoteID,
 		"usn":    strconv.FormatInt(note.Usn, 10),
 	}, nil)
@@ -442,12 +503,15 @@ func (c *Client) DeleteTrash(note *models.Note) (*APIResponse, error) {
 	if err := json.Unmarshal(resp.Body(), &apiResp); err != nil {
 		return nil, err
 	}
+	if err := checkAPIResponse(&apiResp, "delete note"); err != nil {
+		return &apiResp, err
+	}
 
 	return &apiResp, nil
 }
 
 func (c *Client) AddTag(title string) (*models.Tag, error) {
-	resp, err := c.post("tag/addTag", map[string]string{
+	resp, err := c.post("client/tag/add", map[string]string{
 		"tag": title,
 	}, nil)
 	if err != nil {
@@ -463,7 +527,7 @@ func (c *Client) AddTag(title string) (*models.Tag, error) {
 }
 
 func (c *Client) DeleteTag(tag *models.Tag) (*APIResponse, error) {
-	resp, err := c.post("tag/deleteTag", map[string]string{
+	resp, err := c.post("client/tag/delete", map[string]string{
 		"tag": tag.Tag,
 		"usn": strconv.FormatInt(tag.Usn, 10),
 	}, nil)
@@ -474,6 +538,9 @@ func (c *Client) DeleteTag(tag *models.Tag) (*APIResponse, error) {
 	var apiResp APIResponse
 	if err := json.Unmarshal(resp.Body(), &apiResp); err != nil {
 		return nil, err
+	}
+	if err := checkAPIResponse(&apiResp, "delete tag"); err != nil {
+		return &apiResp, err
 	}
 
 	return &apiResp, nil

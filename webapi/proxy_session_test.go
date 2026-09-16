@@ -15,13 +15,13 @@ func TestSharedNotebooksRestoresAndRenewsSession(t *testing.T) {
 	var logins atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/doLogin":
+		case "/api2/doLogin":
 			logins.Add(1)
 			http.SetCookie(w, &http.Cookie{Name: "session", Value: "valid"})
 			w.Write([]byte(`{"Ok":true}`))
-		case "/api/system/version":
+		case "/api2/system/version":
 			w.Write([]byte(`{"server":"gemsnote","version":"1.0.0","min_version":""}`))
-		case "/web/bootstrap":
+		case "/api2/web/bootstrap":
 			cookie, err := r.Cookie("session")
 			if err != nil || cookie.Value != "valid" {
 				w.Write([]byte(`{"Ok":true,"User":null}`))

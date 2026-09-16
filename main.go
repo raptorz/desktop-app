@@ -109,10 +109,11 @@ func main() {
 		os.Exit(1)
 	}
 
+	serverProxy := webapi.NewServerProxy(database, app.files)
 	apiHandler := &webapi.Handler{
 		DB:      database,
 		Files:   service.NewFileService(database),
-		Proxy:   webapi.NewServerProxy(database, app.files),
+		Proxy:   serverProxy,
 		Version: AppVersion,
 		Dist:    dist,
 		OnLogin: func() {
@@ -121,6 +122,7 @@ func main() {
 			// render already sees the server snapshot; the shared cache refresh
 			// stays independent in the background.
 			_ = app.FullSyncForce()
+			serverProxy.RefreshUserProfile()
 			go app.sharedSync.SyncOnce()
 		},
 		OnLogout: func() error {
@@ -139,10 +141,14 @@ func main() {
 			return err
 		},
 		OnSync: func() (any, error) {
-			return app.IncrSync(), nil
+			result := app.IncrSync()
+			serverProxy.RefreshUserProfile()
+			return result, nil
 		},
 		OnFullSync: func() (any, error) {
-			return app.FullSyncForce(), nil
+			result := app.FullSyncForce()
+			serverProxy.RefreshUserProfile()
+			return result, nil
 		},
 		OnSharedDownload: func() { go app.sharedSync.DownloadPending() },
 	}

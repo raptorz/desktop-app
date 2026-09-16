@@ -58,10 +58,10 @@ func (m *mockServer) handler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	switch r.URL.Path {
-	case "/api/shared/capabilities":
+	case "/api2/shared/capabilities":
 		json.NewEncoder(w).Encode(map[string]any{"Ok": true, "ProtocolVersion": 1, "Snapshot": true})
 
-	case "/api/shared/snapshots":
+	case "/api2/shared/snapshots":
 		m.snapshotHits++
 		if m.emptySnapshot {
 			json.NewEncoder(w).Encode(map[string]any{"Ok": true, "SnapshotId": "snap", "Total": 0})
@@ -73,7 +73,7 @@ func (m *mockServer) handler(w http.ResponseWriter, r *http.Request) {
 		}
 		json.NewEncoder(w).Encode(map[string]any{"Ok": true, "SnapshotId": "snap", "Total": total})
 
-	case "/api/shared/snapshots/snap/items":
+	case "/api2/shared/snapshots/snap/items":
 		if m.emptySnapshot {
 			json.NewEncoder(w).Encode(map[string]any{"Ok": true, "Items": []any{}, "NextPageToken": "", "Complete": true, "Total": 0})
 			return
@@ -96,7 +96,7 @@ func (m *mockServer) handler(w http.ResponseWriter, r *http.Request) {
 		page := []models.SharedSnapshotItem{m.fileItem()}
 		json.NewEncoder(w).Encode(map[string]any{"Ok": true, "Items": page, "NextPageToken": "", "Complete": true, "Total": 2})
 
-	case "/api/shared/notes/" + testNoteID + "/content":
+	case "/api2/shared/notes/" + testNoteID + "/content":
 		m.contentHits++
 		defer func() { m.deniedOnce = true }()
 		if m.denyContent {
@@ -105,7 +105,7 @@ func (m *mockServer) handler(w http.ResponseWriter, r *http.Request) {
 		}
 		json.NewEncoder(w).Encode(map[string]any{"Ok": true, "NoteId": testNoteID, "Version": digest([]byte("shared body")), "Digest": digest([]byte("shared body")), "Content": "shared body"})
 
-	case "/api/shared/notes/" + testNoteID + "/files/" + testImageID:
+	case "/api2/shared/notes/" + testNoteID + "/files/" + testImageID:
 		w.Header().Set("Content-Type", "application/octet-stream")
 		w.Header().Set("X-Gemsnote-SHA256", digest(m.imageBytes))
 		w.Write(m.imageBytes)

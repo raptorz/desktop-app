@@ -28,8 +28,8 @@ var (
 )
 
 func normalizeContent(s string) string {
-	s = legacyImageRe.ReplaceAllString(s, "/api/file/getImage?fileId=$1")
-	return legacyAttachRe.ReplaceAllString(s, "/api/file/getAttach?fileId=$1")
+	s = legacyImageRe.ReplaceAllString(s, "/api2/file/getImage?fileId=$1")
+	return legacyAttachRe.ReplaceAllString(s, "/api2/file/getAttach?fileId=$1")
 }
 
 func excerpt(content string, limit int) string {
@@ -193,6 +193,7 @@ func (h *Handler) noteListItem(n *models.Note) map[string]any {
 		"Title":       n.Title,
 		"Desc":        n.Desc,
 		"IsStar":      n.IsStar,
+		"IsDirty":     n.IsDirty,
 		"CreatedTime": timeOrNow(n.CreatedTime),
 		"UpdatedTime": timeOrNow(n.UpdatedTime),
 	}
@@ -316,7 +317,7 @@ func (h *Handler) rejectSharedWrite(w http.ResponseWriter, r *http.Request, path
 	if r.Method == http.MethodGet {
 		return false
 	}
-	write := map[string]bool{"/web/save": true, "/web/restore": true, "/note/deleteNote": true, "/note/deleteTrash": true, "/note/moveNote": true, "/note/copyNote": true, "/attach/uploadAttach": true, "/attach/deleteAttach": true, "/file/pasteImage": true}
+	write := map[string]bool{"/api2/save": true, "/api2/restore": true, "/api2/note/deleteNote": true, "/api2/note/deleteTrash": true, "/api2/note/moveNote": true, "/api2/note/copyNote": true, "/api2/attachments/upload": true, "/api2/attachments/delete": true, "/api2/file/pasteImage": true}
 	if !write[path] {
 		return false
 	}
@@ -336,7 +337,7 @@ func (h *Handler) rejectSharedWrite(w http.ResponseWriter, r *http.Request, path
 			return true
 		}
 	}
-	if path == "/web/save" && h.form(r, "ownerId") != "" && h.form(r, "ownerId") != user.ID {
+	if path == "/api2/save" && h.form(r, "ownerId") != "" && h.form(r, "ownerId") != user.ID {
 		h.fail(w, "sharedReadOnly")
 		return true
 	}
@@ -344,7 +345,7 @@ func (h *Handler) rejectSharedWrite(w http.ResponseWriter, r *http.Request, path
 		h.fail(w, "sharedReadOnly")
 		return true
 	}
-	if path == "/attach/deleteAttach" && h.DB.IsSharedFile(accountID, h.form(r, "attachId")) {
+	if path == "/api2/attachments/delete" && h.DB.IsSharedFile(accountID, h.form(r, "attachId")) {
 		h.fail(w, "sharedReadOnly")
 		return true
 	}

@@ -1422,7 +1422,7 @@ func (a *App) CountNotesByTag(tag string) int {
 }
 
 func (a *App) FixContentUrl(content string) string {
-	return utils.FixNoteContent(content, "http://127.0.0.1:8912/api", "leanote://file")
+	return utils.FixNoteContent(content, "http://127.0.0.1:8912/api2", "leanote://file")
 }
 
 func (a *App) GetImageUrl(fileID string) string {

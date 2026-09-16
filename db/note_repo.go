@@ -263,6 +263,11 @@ func (d *Database) UpdateNote(note *models.Note) error {
 	return err
 }
 
+func (d *Database) SetNoteNotebook(noteID, notebookID string) error {
+	_, err := d.db.Exec(`UPDATE notes SET notebook_id = ?, updated_time = ? WHERE note_id = ?`, notebookID, time.Now().Unix(), noteID)
+	return err
+}
+
 func (d *Database) UpdateNoteForce(note *models.Note, needReloadContent bool) error {
 	tagsJSON, _ := json.Marshal(note.Tags)
 

@@ -11,7 +11,7 @@ gemsnote/
 └── desktop-app/
 ```
 
-版本号集中定义在 `desktop-app/api/version.go` 的 `ClientVersion`。脚本会拒绝与该版本不一致的构建参数。
+版本号集中定义在 `desktop-app/api2/version.go` 的 `ClientVersion`。脚本会拒绝与该版本不一致的构建参数。
 
 ## 支持的平台
 
@@ -65,7 +65,7 @@ sudo mv appimagetool /usr/local/bin/
 
 ```bash
 APPIMAGE_RUNTIME_FILE=/absolute/path/to/runtime-x86_64 \
-  scripts/build-release.sh 1.0.0 linux amd64
+  scripts/build-release.sh 1.0.0 linux amd64 /absolute/path/to/release
 ```
 
 路径必须指向实际 runtime 文件，建议使用绝对路径。脚本会将其作为 `appimagetool --runtime-file` 参数传入，因此构建期间不再需要在线下载 runtime。
@@ -88,7 +88,7 @@ scripts/build-release.sh 1.0.0
 scripts/build-release.sh <version> [linux|darwin] [amd64|arm64] [absolute-output-dir]
 ```
 
-平台、架构和输出目录均可省略；默认使用当前宿主平台、宿主架构和 `desktop-app/release/`。指定的平台和架构必须与宿主一致，输出目录如果指定则必须是绝对路径。
+平台、架构和输出目录可以省略，默认使用当前宿主平台、宿主架构和 `desktop-app/release/`。指定的平台和架构必须与宿主一致，输出目录如果指定则必须是绝对路径。
 
 ## Windows
 

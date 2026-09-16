@@ -54,10 +54,10 @@ func FixNoteContent(content, serverURL, localURL string) string {
 	}
 
 	replacements := map[string]string{
-		strings.Replace(serverURL, "https", "https*", 1) + "/file/outputImage": localURL,
-		serverURL + "/api/file/getImage":                                       localURL,
-		serverURL + "/api/file/getAttach":                                      localURL,
-		serverURL + "/attach/download?attachId":                                localURL + "?fileId",
+		strings.Replace(serverURL, "https", "https*", 1) + "/api2/file/outputImage": localURL,
+		serverURL + "/api2/file/getImage":                                       localURL,
+		serverURL + "/api2/file/getAttach":                                      localURL,
+		serverURL + "/api2/attach/download?attachId":                                localURL + "?fileId",
 	}
 
 	for old, new := range replacements {
@@ -72,8 +72,8 @@ func FixNoteContentForSend(content, serverURL, localURL string) string {
 	}
 
 	replacements := map[string]string{
-		localURL:                  serverURL + "/api/file/getImage",
-		"leanote://file/getImage": serverURL + "/api/file/getImage",
+		localURL:                  serverURL + "/api2/file/getImage",
+		"leanote://file/getImage": serverURL + "/api2/file/getImage",
 	}
 
 	for old, new := range replacements {

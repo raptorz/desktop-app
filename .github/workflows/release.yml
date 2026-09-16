@@ -209,7 +209,7 @@ jobs:
           cp build/appicon.png "$appdir/usr/share/icons/hicolor/256x256/apps/gemsnote.png"
           printf '%s\n' '#!/bin/sh' 'HERE="$(dirname "$(readlink -f "$0")")"' 'exec "$HERE/usr/bin/gemsnote" "$@"' > "$appdir/AppRun"
           chmod 0755 "$appdir/AppRun"
-          printf '%s\n' '[Desktop Entry]' 'Type=Application' 'Name=Gemsnote' 'Comment=珠玑笔记' 'Exec=gemsnote' 'Icon=gemsnote' 'StartupWMClass=gemsnote' 'Categories=Office;Utility;' 'Terminal=false' > "$appdir/gemsnote.desktop"
+          printf '%s\n' '[Desktop Entry]' 'Type=Application' 'Name=Gemsnote' 'Comment=珠玑笔记' 'Exec=gemsnote' 'Icon=gemsnote' 'StartupWMClass=gemsnote' 'Categories=Office;' 'Terminal=false' > "$appdir/gemsnote.desktop"
           cp "$appdir/gemsnote.desktop" "$appdir/usr/share/applications/gemsnote.desktop"
           (cd "$appdir" && zip -qr "$GITHUB_WORKSPACE/gemsnote/desktop-app/release/gemsnote-${version}-${{ matrix.asset }}.zip" .)
           APPIMAGE_EXTRACT_AND_RUN=1 appimagetool "$appdir" "release/gemsnote-${version}-${{ matrix.asset }}.AppImage"

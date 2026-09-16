@@ -22,3 +22,54 @@ func TestLastSyncStateTimeAcceptsStringAndNumber(t *testing.T) {
 		}
 	}
 }
+
+func TestCheckAPIResponseRejectsFailedServerResponse(t *testing.T) {
+	if err := checkAPIResponse(&APIResponse{Ok: false, Msg: "conflict"}, "update note"); err == nil {
+		t.Fatal("expected failed API response to be returned as an error")
+	}
+	if err := checkAPIResponse(&APIResponse{Ok: true}, "update note"); err != nil {
+		t.Fatalf("unexpected error for successful API response: %v", err)
+	}
+}
+
+func TestDecodeNoteResponseSupportsLeanoteDirectAndWrappedResponses(t *testing.T) {
+	for _, body := range []string{
+		`{"NoteId":"507f1f77bcf86cd799439011","Title":"direct","Usn":4}`,
+		`{"Ok":true,"Note":{"NoteId":"507f1f77bcf86cd799439011","Title":"wrapped","Usn":5}}`,
+	} {
+		note, err := decodeNoteResponse([]byte(body), "update note")
+		if err != nil || note == nil || note.NoteID == "" {
+			t.Fatalf("decode %s: note=%+v err=%v", body, note, err)
+		}
+	}
+	if _, err := decodeNoteResponse([]byte(`{"Ok":false,"Msg":"conflict"}`), "update note"); err == nil {
+		t.Fatal("expected wrapped failure to be returned as an error")
+	}
+}
+
+func TestDecodeNotebookResponseSupportsDirectResponse(t *testing.T) {
+	notebook, err := decodeNotebookResponse([]byte(`{"NotebookId":"507f1f77bcf86cd799439011","Title":"direct"}`), "update notebook")
+	if err != nil || notebook == nil || notebook.NotebookID == "" {
+		t.Fatalf("decode notebook: notebook=%+v err=%v", notebook, err)
+	}
+}
+
+func TestFlattenFormDataUsesLeanoteFieldNames(t *testing.T) {
+	data := map[string]interface{}{
+		"NoteId": "note-1",
+		"Tags":   []string{"one", "two"},
+		"Files":  []map[string]interface{}{{"LocalFileId": "file-1", "HasBody": true}},
+	}
+	form := flattenFormData(data)
+	for key, want := range map[string]string{
+		"NoteId":                "note-1",
+		"Tags[0]":               "one",
+		"Tags[1]":               "two",
+		"Files[0][LocalFileId]": "file-1",
+		"Files[0][HasBody]":     "true",
+	} {
+		if form[key] != want {
+			t.Fatalf("form[%q] = %q, want %q (all=%v)", key, form[key], want, form)
+		}
+	}
+}

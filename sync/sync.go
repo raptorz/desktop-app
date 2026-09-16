@@ -187,10 +187,12 @@ func (s *SyncService) IncrSync() (*models.SyncInfo, error) {
 
 	if err := s.sendChanges(syncInfo); err != nil {
 		logrus.Errorf("Send changes error: %v", err)
+		return nil, err
 	}
 
 	if err := s.syncImagesAndAttachs(syncInfo); err != nil {
 		logrus.Errorf("Sync images/attachs error: %v", err)
+		return nil, err
 	}
 
 	s.mu.Lock()

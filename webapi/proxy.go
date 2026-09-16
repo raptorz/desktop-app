@@ -156,7 +156,7 @@ func (p *ServerProxy) LoginServer(email, pwd string) (bool, string) {
 		return false, "offline"
 	}
 	form := url.Values{"email": {email}, "pwd": {pwd}}
-	data, _, err := p.call(http.MethodPost, "/doLogin", form, nil)
+	data, _, err := p.call(http.MethodPost, "/api2/doLogin", form, nil)
 	if err != nil {
 		return false, "offline"
 	}
@@ -175,7 +175,7 @@ func (p *ServerProxy) LoginServer(email, pwd string) (bool, string) {
 // checkServerVersion distinguishes Gemsnote from an older Leanote endpoint.
 // An empty notice means the server could not be checked; login remains usable.
 func (p *ServerProxy) checkServerVersion() string {
-	resp, err := p.client.Get(p.host() + "/api/system/version")
+	resp, err := p.client.Get(p.host() + "/api2/system/version")
 	if err != nil {
 		return ""
 	}
@@ -202,7 +202,7 @@ func (p *ServerProxy) fetchHistories(noteID string) ([]map[string]any, bool) {
 	if !p.configured() || !p.ensureSession() {
 		return nil, false
 	}
-	data, _, err := p.call(http.MethodGet, "/api/note/getHistories", url.Values{"noteId": {noteID}}, nil)
+	data, _, err := p.call(http.MethodGet, "/api2/note/getHistories", url.Values{"noteId": {noteID}}, nil)
 	if err != nil {
 		return nil, false
 	}
@@ -223,7 +223,7 @@ func (p *ServerProxy) fetchHistories(noteID string) ([]map[string]any, bool) {
 			// Old Leanote/Gemsnote responses only have an array index.
 			contentParams.Set("index", strconv.Itoa(meta.Index))
 		}
-		contentData, _, err := p.call(http.MethodGet, "/api/note/getHistoryContent", contentParams, nil)
+		contentData, _, err := p.call(http.MethodGet, "/api2/note/getHistoryContent", contentParams, nil)
 		if err != nil {
 			return nil, false
 		}
@@ -247,7 +247,7 @@ func (p *ServerProxy) FetchAPIToken(email, pwd string) string {
 	if !p.configured() {
 		return ""
 	}
-	data, _, err := p.call(http.MethodPost, "/api/auth/login", url.Values{"email": {email}, "pwd": {pwd}}, nil)
+	data, _, err := p.call(http.MethodPost, "/api2/auth/login", url.Values{"email": {email}, "pwd": {pwd}}, nil)
 	if err != nil {
 		return ""
 	}
@@ -262,7 +262,7 @@ func (p *ServerProxy) FetchAPIToken(email, pwd string) string {
 }
 
 func (p *ServerProxy) fetchServerUser() *models.User {
-	data, _, err := p.call(http.MethodGet, "/web/bootstrap", nil, nil)
+	data, _, err := p.call(http.MethodGet, "/api2/web/bootstrap", nil, nil)
 	if err != nil {
 		return nil
 	}
@@ -292,6 +292,12 @@ func (p *ServerProxy) fetchServerUser() *models.User {
 		Email:    payload.User.Email,
 		IsActive: true,
 	}
+}
+
+// RefreshUserProfile refreshes profile metadata cached by the local bridge.
+// In particular, avatar URLs are part of bootstrap rather than sync payloads.
+func (p *ServerProxy) RefreshUserProfile() bool {
+	return p.fetchServerUser() != nil
 }
 
 func (p *ServerProxy) ensureSession() bool {
@@ -327,7 +333,7 @@ func (p *ServerProxy) GuestConfig() (openRegister, needCaptcha bool) {
 	if !p.configured() {
 		return false, false
 	}
-	data, _, err := p.call(http.MethodGet, "/web/bootstrap", nil, nil)
+	data, _, err := p.call(http.MethodGet, "/api2/web/bootstrap", nil, nil)
 	if err != nil {
 		return false, false
 	}
@@ -366,7 +372,7 @@ func (p *ServerProxy) SharedNotebooks(user *models.User) (map[string]any, bool) 
 }
 
 func (p *ServerProxy) fetchBootstrapSession() (map[string]any, bool, bool) {
-	data, _, err := p.call(http.MethodGet, "/web/bootstrap", nil, nil)
+	data, _, err := p.call(http.MethodGet, "/api2/web/bootstrap", nil, nil)
 	if err != nil {
 		return nil, false, false
 	}
@@ -419,7 +425,7 @@ func (p *ServerProxy) Forward(w http.ResponseWriter, r *http.Request, form url.V
 	return true
 }
 
-var guestPaths = []string{"/captcha/", "/doRegister", "/doFindPassword", "/findPasswordUpdate", "/web/verifyEmail"}
+var guestPaths = []string{"/captcha/", "/api2/doRegister", "/api2/doFindPassword", "/api2/findPasswordUpdate", "/api2/web/verifyEmail"}
 
 func (p *ServerProxy) isGuestPath(path string) bool {
 	for _, prefix := range guestPaths {
@@ -437,17 +443,18 @@ func (h *Handler) routeProxied(w http.ResponseWriter, r *http.Request) bool {
 	path := r.URL.Path
 	proxy := h.Proxy
 
-	proxied := strings.HasPrefix(path, "/share/") || strings.HasPrefix(path, "/member/") ||
-		strings.HasPrefix(path, "/user/") || strings.HasPrefix(path, "/captcha/") ||
-		path == "/web/shareMembers" || path == "/web/groups" || path == "/web/emailChange" ||
-		path == "/web/verifyEmail" || path == "/doRegister" || path == "/doFindPassword" ||
-		path == "/findPasswordUpdate" || path == "/file/uploadAvatar" ||
-		strings.HasPrefix(path, "/web/admin")
+	proxied := strings.HasPrefix(path, "/api2/share/") || strings.HasPrefix(path, "/api2/member/") ||
+		strings.HasPrefix(path, "/api2/user/") || strings.HasPrefix(path, "/captcha/") ||
+		path == "/api2/groups" || path == "/api2/admin/data" || path == "/api2/avatar" ||
+		path == "/api2/web/shareMembers" || path == "/api2/web/groups" || path == "/api2/web/emailChange" ||
+		path == "/api2/web/verifyEmail" || path == "/api2/doRegister" || path == "/api2/doFindPassword" ||
+		path == "/api2/findPasswordUpdate" || path == "/api2/file/uploadAvatar" ||
+		strings.HasPrefix(path, "/api2/web/admin") || path == "/api2/admin/data"
 	if !proxied {
 		return false
 	}
 
-	if path == "/doLogin" || path == "/doRegister" || path == "/doFindPassword" {
+	if path == "/api2/doLogin" || path == "/api2/doRegister" || path == "/api2/doFindPassword" {
 		if host := h.form(r, "host"); host != "" {
 			proxy.SetHost(host)
 		}
@@ -458,14 +465,14 @@ func (h *Handler) routeProxied(w http.ResponseWriter, r *http.Request) bool {
 		return proxy.Forward(w, r, nil, nil)
 	case proxy.isGuestPath(path):
 		return proxy.Forward(w, r, r.Form, nil)
-	case path == "/file/uploadAvatar":
+	case path == "/api2/file/uploadAvatar" || path == "/api2/avatar":
 		_, fh, err := r.FormFile("file")
 		if err != nil {
 			h.fail(w, "noFile")
 			return true
 		}
 		return h.proxyAvatar(w, r, fh)
-	case path == "/user/updatePwd":
+	case path == "/api2/user/updatePwd":
 		return h.proxyUpdatePwd(w, r)
 	}
 
@@ -513,7 +520,7 @@ func (h *Handler) proxyAvatar(w http.ResponseWriter, r *http.Request, fh *multip
 	defer os.Remove(tmp)
 	if result, err := h.Files.CopyFile(tmp, true); err == nil {
 		fileID, _ := result["FileId"].(string)
-		h.DB.SetConfig("logo:"+user.ID, "/file/getImage?fileId="+fileID)
+		h.DB.SetConfig("logo:"+user.ID, "/api2/file/getImage?fileId="+fileID)
 	}
 	return true
 }

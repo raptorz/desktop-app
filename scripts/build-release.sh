@@ -49,12 +49,12 @@ command -v npm >/dev/null 2>&1 || {
   echo "Install Node.js 22 (including npm) from https://nodejs.org/." >&2
   exit 1
 }
-command -v wails >/dev/null 2>&1 || {
-  go_bin="$(go env GOPATH)/bin"
+wails_bin="$HOME/go/bin/wails"
+[[ -x "$wails_bin" ]] || {
   echo "Required tool not found: wails" >&2
   echo "Install Wails CLI v2.12.0 with:" >&2
   echo "  go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0" >&2
-  echo "Then add $go_bin to PATH and retry." >&2
+  echo "The installer should create $wails_bin; make sure it is executable and retry." >&2
   exit 1
 }
 if [[ "$platform" == "darwin" ]]; then
@@ -94,7 +94,7 @@ if [[ -z "$client_version" || "$client_version" != "$version" ]]; then
   exit 1
 fi
 
-wails_version="$(wails version 2>&1)"
+wails_version="$("$wails_bin" version 2>&1)"
 grep -Eq '(^|[^0-9])v?2\.12\.0([^0-9]|$)' <<<"$wails_version" || {
   echo "Wails CLI v2.12.0 is required; got: $wails_version" >&2
   exit 1
@@ -107,7 +107,7 @@ npm test --prefix "$source_root/frontend" -- --run
 npm run build --prefix "$source_root/frontend"
 
 (cd "$desktop_dir" && go test ./...)
-(cd "$desktop_dir" && wails build -clean -platform "$platform/$arch")
+(cd "$desktop_dir" && "$wails_bin" build -clean -platform "$platform/$arch")
 
 asset="gemsnote-$version-$platform-$arch"
 if [[ "$platform" == "linux" ]]; then

@@ -2,9 +2,11 @@ package webapi
 
 import (
 	"encoding/json"
+	"fmt"
 	"io/fs"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/gemsnote/gemsnote/db"
@@ -42,6 +44,26 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.writeJSON(w, map[string]any{"Ok": false, "Msg": "invalidForm"})
 		return
 	}
+	if strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			h.writeJSON(w, map[string]any{"Ok": false, "Msg": "invalidJSON"})
+			return
+		}
+		if r.Form == nil {
+			r.Form = make(url.Values)
+		}
+		for key, value := range payload {
+			switch v := value.(type) {
+			case []any:
+				for i, item := range v {
+					r.Form.Set(fmt.Sprintf("%s[%d]", key, i), fmt.Sprint(item))
+				}
+			default:
+				r.Form.Set(key, fmt.Sprint(v))
+			}
+		}
+	}
 
 	if h.route(w, r) {
 		return
@@ -53,7 +75,29 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // isGetApiPath lists GET endpoints served by the handler; every other GET is an
 // SPA route rendered via index.html fallback.
 func isGetApiPath(path string) bool {
-	for _, prefix := range []string{"/web/", "/captcha/", "/attach/download", "/api/", "/file/", "/logout"} {
+	for _, prefix := range []string{
+		"/api2/bootstrap",
+		"/api2/web/bootstrap",
+		"/api2/web/sync",
+		"/api2/web/fullSync",
+		"/api2/captcha/",
+		"/captcha/",
+		"/api2/attach/download",
+		"/api2/attachments/download",
+		"/api2/file/getImage",
+		"/api2/file/getAttach",
+		"/api2/system/version",
+		"/api2/user/getSyncState",
+		"/api2/notebook/getSyncNotebooks",
+		"/api2/note/getSyncNotes",
+		"/api2/note/getNoteContent",
+		"/api2/note/getNote",
+		"/api2/note/getHistories",
+		"/api2/note/getHistoryContent",
+		"/api2/tag/getSyncTags",
+		"/api2/shared/",
+		"/api2/logout",
+	} {
 		if strings.HasPrefix(path, prefix) {
 			return true
 		}
@@ -68,62 +112,86 @@ func (h *Handler) route(w http.ResponseWriter, r *http.Request) bool {
 	}
 
 	switch {
-	case path == "/web/bootstrap" && method == http.MethodGet:
+	case path == "/api2/bootstrap" && method == http.MethodGet:
 		h.bootstrap(w)
-	case path == "/web/notes":
+	case path == "/api2/notes":
 		h.notes(w, r)
-	case path == "/web/star":
+	case path == "/api2/star":
 		h.star(w, r)
-	case path == "/web/sync" && method == http.MethodPost:
-		h.syncNow(w, h.OnSync)
-	case path == "/web/fullSync" && method == http.MethodPost:
-		h.syncNow(w, h.OnFullSync)
-	case path == "/web/logout" && method == http.MethodPost:
-		h.logoutJSON(w)
-	case path == "/web/document":
+	case path == "/api2/document":
 		h.document(w, r)
-	case path == "/share/listShareNotes":
-		h.sharedNotes(w, r)
-	case path == "/web/save":
+	case path == "/api2/save":
 		h.save(w, r)
-	case path == "/web/restore":
+	case path == "/api2/restore":
 		h.restore(w, r)
-	case path == "/notebook/addNotebook":
-		h.addNotebook(w, r)
-	case path == "/notebook/updateNotebookTitle":
-		h.renameNotebook(w, r)
-	case path == "/notebook/deleteNotebook":
-		h.deleteNotebook(w, r)
-	case path == "/note/deleteNote":
-		h.deleteNote(w, r)
-	case path == "/note/deleteTrash":
-		h.deleteTrashNote(w, r)
-	case path == "/note/moveNote":
-		h.moveNote(w, r)
-	case path == "/note/copyNote":
-		h.copyNote(w, r)
-	case path == "/noteContentHistory/listHistories":
-		h.listHistories(w, r)
-	case path == "/attach/getAttachs":
+	case path == "/api2/attachments":
 		h.getAttachs(w, r)
-	case path == "/attach/uploadAttach":
+	case path == "/api2/attachments/upload":
 		h.uploadAttach(w, r)
-	case path == "/attach/deleteAttach":
+	case path == "/api2/attachments/delete":
 		h.deleteAttach(w, r)
-	case path == "/attach/queueSharedDownload":
-		h.queueSharedDownload(w, r)
-	case path == "/attach/download" && method == http.MethodGet:
+	case path == "/api2/attachments/download" && method == http.MethodGet:
 		h.downloadAttach(w, r)
-	case path == "/file/pasteImage":
+	case path == "/api2/avatar":
+		h.routeProxied(w, r)
+	case path == "/api2/web/bootstrap" && method == http.MethodGet:
+		h.bootstrap(w)
+	case path == "/api2/web/notes":
+		h.notes(w, r)
+	case path == "/api2/web/star":
+		h.star(w, r)
+	case path == "/api2/web/sync" && method == http.MethodPost:
+		h.syncNow(w, h.OnSync)
+	case path == "/api2/web/fullSync" && method == http.MethodPost:
+		h.syncNow(w, h.OnFullSync)
+	case path == "/api2/web/logout" && method == http.MethodPost:
+		h.logoutJSON(w)
+	case path == "/api2/logout" && method == http.MethodPost:
+		h.logoutJSON(w)
+	case path == "/api2/web/document":
+		h.document(w, r)
+	case path == "/api2/share/listShareNotes":
+		h.sharedNotes(w, r)
+	case path == "/api2/web/save":
+		h.save(w, r)
+	case path == "/api2/web/restore":
+		h.restore(w, r)
+	case path == "/api2/notebook/addNotebook":
+		h.addNotebook(w, r)
+	case path == "/api2/notebook/updateNotebookTitle":
+		h.renameNotebook(w, r)
+	case path == "/api2/notebook/deleteNotebook":
+		h.deleteNotebook(w, r)
+	case path == "/api2/note/deleteNote":
+		h.deleteNote(w, r)
+	case path == "/api2/note/deleteTrash":
+		h.deleteTrashNote(w, r)
+	case path == "/api2/note/moveNote":
+		h.moveNote(w, r)
+	case path == "/api2/note/copyNote":
+		h.copyNote(w, r)
+	case path == "/api2/noteContentHistory/listHistories":
+		h.listHistories(w, r)
+	case path == "/api2/attach/getAttachs":
+		h.getAttachs(w, r)
+	case path == "/api2/attach/uploadAttach":
+		h.uploadAttach(w, r)
+	case path == "/api2/attach/deleteAttach":
+		h.deleteAttach(w, r)
+	case path == "/api2/attach/queueSharedDownload":
+		h.queueSharedDownload(w, r)
+	case path == "/api2/attach/download" && method == http.MethodGet:
+		h.downloadAttach(w, r)
+	case path == "/api2/file/pasteImage":
 		h.pasteImage(w, r)
-	case path == "/api/file/getImage" || path == "/file/getImage":
+	case path == "/api2/file/getImage":
 		h.serveImage(w, r)
-	case path == "/doLogin":
+	case path == "/api2/doLogin":
 		if host := h.form(r, "host"); host != "" && h.Proxy != nil {
 			h.Proxy.SetHost(host)
 		}
 		h.doLogin(w, r)
-	case path == "/logout" && method == http.MethodGet:
+	case path == "/api2/logout" && method == http.MethodGet:
 		h.logout(w, r)
 	default:
 		return h.routeProxied(w, r)

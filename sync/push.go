@@ -2,9 +2,11 @@ package sync
 
 import (
 	"encoding/base64"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 
 	"github.com/sirupsen/logrus"
 
@@ -13,26 +15,34 @@ import (
 	"github.com/gemsnote/gemsnote/utils"
 )
 
-var localImageRe = regexp.MustCompile(`(?:leanote://file/getImage|/api/file/getImage)\?fileId=([a-zA-Z0-9]{24})`)
+var localImageRe = regexp.MustCompile(`(?:leanote://file/getImage|/api2/file/getImage)\?fileId=([a-zA-Z0-9]{24})`)
 
 func (s *SyncService) sendChanges(syncInfo *models.SyncInfo) error {
 	logrus.Info("Sending changes...")
 
 	userID := s.db.GetCurrentUserID()
+	var firstErr error
 
 	if err := s.sendNotebookChanges(userID, syncInfo); err != nil {
 		logrus.Errorf("Send notebook changes error: %v", err)
+		firstErr = err
 	}
 
 	if err := s.sendNoteChanges(userID, syncInfo); err != nil {
 		logrus.Errorf("Send note changes error: %v", err)
+		if firstErr == nil {
+			firstErr = err
+		}
 	}
 
 	if err := s.sendTagChanges(userID, syncInfo); err != nil {
 		logrus.Errorf("Send tag changes error: %v", err)
+		if firstErr == nil {
+			firstErr = err
+		}
 	}
 
-	return nil
+	return firstErr
 }
 
 func (s *SyncService) sendNotebookChanges(userID string, syncInfo *models.SyncInfo) error {
@@ -41,6 +51,7 @@ func (s *SyncService) sendNotebookChanges(userID string, syncInfo *models.SyncIn
 		return err
 	}
 
+	var firstErr error
 	for _, nb := range notebooks {
 		if nb.LocalIsNew && nb.LocalIsDelete {
 			s.db.DeleteLocalNotebook(nb.NotebookID)
@@ -51,20 +62,28 @@ func (s *SyncService) sendNotebookChanges(userID string, syncInfo *models.SyncIn
 		var apiErr error
 
 		if nb.LocalIsNew {
-			serverNb, apiErr = s.api.AddNotebook(nb)
+			serverNb, apiErr = s.api.AddNotebook(s.prepareNotebookForUpload(nb))
 		} else if nb.LocalIsDelete {
 			var resp *api.APIResponse
 			resp, apiErr = s.api.DeleteNotebook(nb)
 			if resp != nil && resp.Ok {
 				s.db.SetNotebookNotDirty(nb.NotebookID)
+			} else if apiErr == nil {
+				apiErr = fmt.Errorf("delete notebook failed")
+			}
+			if apiErr != nil && firstErr == nil {
+				firstErr = apiErr
 			}
 			continue
 		} else {
-			serverNb, apiErr = s.api.UpdateNotebook(nb)
+			serverNb, apiErr = s.api.UpdateNotebook(s.prepareNotebookForUpload(nb))
 		}
 
 		if apiErr != nil {
 			logrus.Errorf("API error for notebook %s: %v", nb.NotebookID, apiErr)
+			if firstErr == nil {
+				firstErr = apiErr
+			}
 			continue
 		}
 
@@ -79,7 +98,7 @@ func (s *SyncService) sendNotebookChanges(userID string, syncInfo *models.SyncIn
 		}
 	}
 
-	return nil
+	return firstErr
 }
 
 func (s *SyncService) sendNoteChanges(userID string, syncInfo *models.SyncInfo) error {
@@ -88,6 +107,7 @@ func (s *SyncService) sendNoteChanges(userID string, syncInfo *models.SyncInfo) 
 		return err
 	}
 
+	var firstErr error
 	for _, note := range notes {
 		if note.InitSync {
 			continue
@@ -98,12 +118,18 @@ func (s *SyncService) sendNoteChanges(userID string, syncInfo *models.SyncInfo) 
 			continue
 		}
 
-		if note.LocalIsNew {
+		// Older caches (and caches reused after switching servers) can contain
+		// a note that was never mapped to a remote NoteId. Treat it as a new
+		// remote note instead of sending an empty NoteId to updateNote.
+		if note.LocalIsNew || note.ServerNoteID == "" {
 			if !note.IsTrash && !note.LocalIsDelete {
 				noteCopy := s.prepareNoteForUpload(note)
 				serverNote, apiErr := s.api.AddNote(noteCopy)
 				if apiErr != nil {
 					logrus.Errorf("Add note error: %v", apiErr)
+					if firstErr == nil {
+						firstErr = apiErr
+					}
 					syncInfo.Note.Errors = append(syncInfo.Note.Errors, &models.SyncError{
 						Err:  apiErr.Error(),
 						Note: note,
@@ -123,6 +149,9 @@ func (s *SyncService) sendNoteChanges(userID string, syncInfo *models.SyncInfo) 
 			resp, apiErr := s.api.DeleteTrash(note)
 			if apiErr != nil {
 				logrus.Errorf("Delete note error: %v", apiErr)
+				if firstErr == nil {
+					firstErr = apiErr
+				}
 				continue
 			}
 
@@ -137,7 +166,27 @@ func (s *SyncService) sendNoteChanges(userID string, syncInfo *models.SyncInfo) 
 			noteCopy := s.prepareNoteForUpload(note)
 			serverNote, apiErr := s.api.UpdateNote(noteCopy)
 			if apiErr != nil {
+				// A valid local cache may still point at a note from a previous
+				// server installation. Re-create it remotely when the server
+				// explicitly says that the NoteId is unknown.
+				if isMissingRemoteNote(apiErr) {
+					if recreated, localNotebookID, addErr := s.recreateMissingNote(note); addErr == nil && recreated != nil {
+						if localNotebookID != "" && localNotebookID != note.NotebookID {
+							_ = s.db.SetNoteNotebook(note.NoteID, localNotebookID)
+							note.NotebookID = localNotebookID
+						}
+						s.processNoteAfterSync(note, recreated, false)
+						syncInfo.Note.ChangeAdds = append(syncInfo.Note.ChangeAdds, recreated.NoteID)
+						s.checkNeedSyncAgain(recreated.Usn)
+						continue
+					} else if addErr != nil {
+						logrus.Errorf("Re-create note %s after missing remote note failed: %v", note.NoteID, addErr)
+					}
+				}
 				logrus.Errorf("Update note error: %v", apiErr)
+				if firstErr == nil {
+					firstErr = apiErr
+				}
 				syncInfo.Note.Errors = append(syncInfo.Note.Errors, &models.SyncError{
 					Err:  apiErr.Error(),
 					Note: note,
@@ -153,15 +202,87 @@ func (s *SyncService) sendNoteChanges(userID string, syncInfo *models.SyncInfo) 
 		}
 	}
 
-	return nil
+	return firstErr
+}
+
+func isMissingRemoteNote(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "noteidnotexists") || strings.Contains(msg, "notexists")
+}
+
+func (s *SyncService) recreateMissingNote(note *models.Note) (*models.Note, string, error) {
+	if note == nil {
+		return nil, "", fmt.Errorf("missing local note")
+	}
+	userID := s.db.GetCurrentUserID()
+	type candidate struct{ localID, serverID string }
+	var candidates []candidate
+	seen := map[string]bool{}
+	addCandidate := func(localID, serverID string) {
+		if serverID == "" || seen[serverID] {
+			return
+		}
+		seen[serverID] = true
+		candidates = append(candidates, candidate{localID: localID, serverID: serverID})
+	}
+	if nb, err := s.db.GetNotebook(note.NotebookID); err == nil && nb != nil {
+		addCandidate(nb.NotebookID, nb.ServerNotebookID)
+	}
+	// The local row may itself contain a server ID. Try it after the explicit
+	// notebook mapping, then fall back to any current notebook for this user.
+	addCandidate(note.NotebookID, note.NotebookID)
+	if notebooks, err := s.db.GetNotebooks(userID); err == nil {
+		for _, nb := range notebooks {
+			if nb != nil && !nb.IsTrash {
+				addCandidate(nb.NotebookID, nb.ServerNotebookID)
+			}
+		}
+	}
+	if len(candidates) == 0 {
+		return nil, "", fmt.Errorf("no notebook available for note recreation")
+	}
+	var lastErr error
+	for _, c := range candidates {
+		copyNote := *note
+		copyNote.ServerNoteID = ""
+		copyNote.LocalIsNew = true
+		copyNote.NotebookID = c.serverID
+		created, err := s.api.AddNote(s.prepareNoteForUpload(&copyNote))
+		if err == nil && created != nil {
+			return created, c.localID, nil
+		}
+		lastErr = err
+		logrus.Warnf("Re-create note %s using notebook %s failed: %v", note.NoteID, c.serverID, err)
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("server returned an empty note")
+	}
+	return nil, "", lastErr
 }
 
 func (s *SyncService) prepareNoteForUpload(note *models.Note) *models.Note {
 	noteCopy := *note
+	// Local notebook IDs are intentionally independent from server IDs. API2
+	// expects NotebookId to reference the remote notebook, so translate the
+	// mapping before sending a note (otherwise the server reports
+	// notebookIdNotExists after a fresh login or server switch).
+	if note.NotebookID != "" {
+		nb, err := s.db.GetNotebook(note.NotebookID)
+		if err == nil && nb == nil {
+			// Some imported caches already store the remote ID in notebook_id.
+			nb, err = s.db.GetNotebookByServerID(note.NotebookID)
+		}
+		if err == nil && nb != nil && nb.ServerNotebookID != "" {
+			noteCopy.NotebookID = nb.ServerNotebookID
+		}
+	}
 
 	user, _ := s.db.GetActiveUser()
 	if user != nil && user.Host != "" && note.Content != "" {
-		localPrefix := "/api/file/getImage"
+		localPrefix := "/api2/file/getImage"
 		noteCopy.Content = utils.FixNoteContentForSend(note.Content, user.Host, localPrefix)
 	}
 
@@ -172,6 +293,19 @@ func (s *SyncService) prepareNoteForUpload(note *models.Note) *models.Note {
 	}
 
 	return &noteCopy
+}
+
+func (s *SyncService) prepareNotebookForUpload(nb *models.Notebook) *models.Notebook {
+	if nb == nil {
+		return nil
+	}
+	nbCopy := *nb
+	if nb.ParentNotebookID != "" {
+		if parent, err := s.db.GetNotebook(nb.ParentNotebookID); err == nil && parent != nil && parent.ServerNotebookID != "" {
+			nbCopy.ParentNotebookID = parent.ServerNotebookID
+		}
+	}
+	return &nbCopy
 }
 
 func (s *SyncService) getNoteFilesForUpload(note *models.Note) ([]*models.FileRef, map[string]interface{}) {
@@ -297,6 +431,7 @@ func (s *SyncService) sendTagChanges(userID string, syncInfo *models.SyncInfo) e
 		return err
 	}
 
+	var firstErr error
 	for _, tag := range tags {
 		if !tag.IsDirty {
 			continue
@@ -306,6 +441,9 @@ func (s *SyncService) sendTagChanges(userID string, syncInfo *models.SyncInfo) e
 			serverTag, apiErr := s.api.AddTag(tag.Tag)
 			if apiErr != nil {
 				logrus.Errorf("Add tag error: %v", apiErr)
+				if firstErr == nil {
+					firstErr = apiErr
+				}
 				continue
 			}
 
@@ -318,6 +456,9 @@ func (s *SyncService) sendTagChanges(userID string, syncInfo *models.SyncInfo) e
 			resp, apiErr := s.api.DeleteTag(tag)
 			if apiErr != nil {
 				logrus.Errorf("Delete tag error: %v", apiErr)
+				if firstErr == nil {
+					firstErr = apiErr
+				}
 				continue
 			}
 
@@ -330,5 +471,5 @@ func (s *SyncService) sendTagChanges(userID string, syncInfo *models.SyncInfo) e
 		}
 	}
 
-	return nil
+	return firstErr
 }
