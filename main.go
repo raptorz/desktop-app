@@ -4,6 +4,7 @@ package main
 
 import (
 	"embed"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -121,8 +122,8 @@ func main() {
 			// personal full sync runs synchronously so the first workspace
 			// render already sees the server snapshot; the shared cache refresh
 			// stays independent in the background.
-			_ = app.FullSyncForce()
 			serverProxy.RefreshUserProfile()
+			_ = app.FullSyncForce()
 			go app.sharedSync.SyncOnce()
 		},
 		OnLogout: func() error {
@@ -141,13 +142,17 @@ func main() {
 			return err
 		},
 		OnSync: func() (any, error) {
+			if !serverProxy.RefreshUserProfile() {
+				return nil, fmt.Errorf("用户资料或头像同步失败，请检查服务端 /api2/user/info 和头像文件")
+			}
 			result := app.IncrSync()
-			serverProxy.RefreshUserProfile()
 			return result, nil
 		},
 		OnFullSync: func() (any, error) {
+			if !serverProxy.RefreshUserProfile() {
+				return nil, fmt.Errorf("用户资料或头像同步失败，请检查服务端 /api2/user/info 和头像文件")
+			}
 			result := app.FullSyncForce()
-			serverProxy.RefreshUserProfile()
 			return result, nil
 		},
 		OnSharedDownload: func() { go app.sharedSync.DownloadPending() },
@@ -208,15 +213,6 @@ func buildMenu(app *App) *menu.Menu {
 	fileMenu.AddText("Quit", keys.CmdOrCtrl("q"), func(_ *menu.CallbackData) {
 		os.Exit(0)
 	})
-
-	editMenu := appMenu.AddSubmenu("Edit")
-	editMenu.AddText("Undo", keys.CmdOrCtrl("z"), func(_ *menu.CallbackData) {})
-	editMenu.AddText("Redo", keys.CmdOrCtrl("shift+z"), func(_ *menu.CallbackData) {})
-	editMenu.AddSeparator()
-	editMenu.AddText("Cut", keys.CmdOrCtrl("x"), func(_ *menu.CallbackData) {})
-	editMenu.AddText("Copy", keys.CmdOrCtrl("c"), func(_ *menu.CallbackData) {})
-	editMenu.AddText("Paste", keys.CmdOrCtrl("v"), func(_ *menu.CallbackData) {})
-	editMenu.AddText("Select All", keys.CmdOrCtrl("a"), func(_ *menu.CallbackData) {})
 
 	viewMenu := appMenu.AddSubmenu("View")
 	viewMenu.AddText("Toggle Full Screen", keys.Key("F11"), func(_ *menu.CallbackData) {})

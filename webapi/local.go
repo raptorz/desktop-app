@@ -685,13 +685,18 @@ func (h *Handler) listHistories(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if user.Host != "" {
+		localNoteID := h.form(r, "noteId")
 		accountID := db.SharedAccountID(user.Host, user.ID)
-		if h.DB.IsSharedNote(accountID, h.form(r, "noteId")) {
+		if h.DB.IsSharedNote(accountID, localNoteID) {
 			h.fail(w, "sharedHistoryUnsupported")
 			return
 		}
 		if h.Proxy != nil {
-			if histories, ok := h.Proxy.fetchHistories(h.form(r, "noteId")); ok {
+			remoteNoteID := localNoteID
+			if note, err := h.DB.GetNote(localNoteID); err == nil && note != nil && note.ServerNoteID != "" {
+				remoteNoteID = note.ServerNoteID
+			}
+			if histories, ok := h.Proxy.fetchHistories(remoteNoteID); ok {
 				h.writeJSON(w, histories)
 				return
 			}
@@ -1017,6 +1022,9 @@ func (h *Handler) doLogin(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) adoptServerUser(email, pwd string) {
 	serverUser := h.Proxy.fetchServerUser()
+	if serverUser == nil {
+		serverUser = h.Proxy.remoteUser
+	}
 	if serverUser == nil {
 		return
 	}

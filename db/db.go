@@ -268,6 +268,26 @@ func (d *Database) GetAllLastSyncState(userID string) (lastUsn, notebookUsn, not
 }
 
 func (d *Database) UpdateUserSyncState(userID string, state map[string]int64) error {
+	var last, notebook, note, tag int64
+	if err := d.db.QueryRow(`SELECT last_sync_usn, notebook_usn, note_usn, tag_usn FROM users WHERE _id = ?`, userID).Scan(&last, &notebook, &note, &tag); err != nil {
+		return err
+	}
+	if value, ok := state["last_sync_usn"]; ok {
+		last = value
+	}
+	if value, ok := state["notebook_usn"]; ok {
+		notebook = value
+	}
+	if value, ok := state["note_usn"]; ok {
+		note = value
+	}
+	if value, ok := state["tag_usn"]; ok {
+		tag = value
+	}
+	lastSyncTime := time.Now().Unix()
+	if value, ok := state["last_sync_time"]; ok {
+		lastSyncTime = value
+	}
 	_, err := d.db.Exec(`
 		UPDATE users SET 
 			last_sync_usn = ?, 
@@ -276,8 +296,7 @@ func (d *Database) UpdateUserSyncState(userID string, state map[string]int64) er
 			tag_usn = ?,
 			last_sync_time = ?
 		WHERE _id = ?
-	`, state["last_sync_usn"], state["notebook_usn"], state["note_usn"], state["tag_usn"],
-		state["last_sync_time"], userID)
+	`, last, notebook, note, tag, lastSyncTime, userID)
 	return err
 }
 

@@ -50,6 +50,34 @@ func (s *SyncService) sendNotebookChanges(userID string, syncInfo *models.SyncIn
 	if err != nil {
 		return err
 	}
+	// Recreated notebook trees must be uploaded parent-first, so the child's
+	// ParentNotebookId can be translated to the newly assigned server ID.
+	byID := make(map[string]*models.Notebook, len(notebooks))
+	for _, nb := range notebooks {
+		byID[nb.NotebookID] = nb
+	}
+	// Topologically order the dirty tree. A simple depth sort can still leave
+	// siblings in the wrong order when legacy parent IDs are malformed.
+	ordered := make([]*models.Notebook, 0, len(notebooks))
+	visiting, visited := map[string]bool{}, map[string]bool{}
+	var visit func(*models.Notebook)
+	visit = func(nb *models.Notebook) {
+		if nb == nil || visited[nb.NotebookID] {
+			return
+		}
+		if visiting[nb.NotebookID] {
+			return
+		} // malformed cycle; sync will promote it
+		visiting[nb.NotebookID] = true
+		visit(byID[nb.ParentNotebookID])
+		delete(visiting, nb.NotebookID)
+		visited[nb.NotebookID] = true
+		ordered = append(ordered, nb)
+	}
+	for _, nb := range notebooks {
+		visit(nb)
+	}
+	notebooks = ordered
 
 	var firstErr error
 	for _, nb := range notebooks {
@@ -110,6 +138,13 @@ func (s *SyncService) sendNoteChanges(userID string, syncInfo *models.SyncInfo) 
 	var firstErr error
 	for _, note := range notes {
 		if note.InitSync {
+			if note.LocalIsNew {
+				err := fmt.Errorf("note %s has no complete local content cache; cannot merge safely", note.NoteID)
+				if firstErr == nil {
+					firstErr = err
+				}
+				logrus.Error(err)
+			}
 			continue
 		}
 
@@ -351,6 +386,9 @@ func (s *SyncService) getNoteFilesForUpload(note *models.Note) ([]*models.FileRe
 			IsAttach:    false,
 			IsDirty:     true,
 		}
+		if img.ServerFileID != "" {
+			fileRef.FileID = img.ServerFileID
+		}
 		files = append(files, fileRef)
 
 		fileDatas[fileID] = base64.StdEncoding.EncodeToString(data)
@@ -377,6 +415,9 @@ func (s *SyncService) getNoteFilesForUpload(note *models.Note) ([]*models.FileRe
 				HasBody:     true,
 				IsAttach:    true,
 				IsDirty:     true,
+			}
+			if att.ServerFileID != "" {
+				fileRef.FileID = att.ServerFileID
 			}
 			files = append(files, fileRef)
 

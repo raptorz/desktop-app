@@ -55,6 +55,110 @@ func (d *Database) GetNotebooks(userID string) ([]*models.Notebook, error) {
 	return d.scanNotebooks(rows)
 }
 
+// ReconcileFullNotebooks queues every locally cached notebook absent from the
+// complete server snapshot for upload. A previously hidden clean row is also
+// restored: full sync merges the two sides for the same account.
+func (d *Database) ReconcileFullNotebooks(userID string, remoteIDs map[string]bool) error {
+	rows, err := d.db.Query(`SELECT notebook_id, server_notebook_id, is_dirty, local_is_new, local_is_delete FROM notebooks WHERE user_id = ?`, userID)
+	if err != nil {
+		return err
+	}
+	type entry struct {
+		localID, remoteID        string
+		dirty, localNew, deleted bool
+	}
+	var entries []entry
+	for rows.Next() {
+		var e entry
+		if err := rows.Scan(&e.localID, &e.remoteID, &e.dirty, &e.localNew, &e.deleted); err != nil {
+			rows.Close()
+			return err
+		}
+		entries = append(entries, e)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if e.localNew || (e.deleted && e.dirty) {
+			continue
+		}
+		if remoteIDs[e.remoteID] {
+			if !e.dirty {
+				_, err = d.db.Exec(`UPDATE notebooks SET local_is_delete = 0 WHERE user_id = ? AND notebook_id = ?`, userID, e.localID)
+			}
+		} else {
+			_, err = d.db.Exec(`UPDATE notebooks SET server_notebook_id = '', is_dirty = 1, local_is_new = 1, local_is_delete = 0 WHERE user_id = ? AND notebook_id = ?`, userID, e.localID)
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// RestoreNotebookParents translates remote parent IDs after all pages of a
+// full snapshot have been inserted. The API orders rows by USN, not tree depth.
+func (d *Database) RestoreNotebookParents(userID string) error {
+	rows, err := d.db.Query(`SELECT notebook_id, parent_notebook_id FROM notebooks WHERE user_id = ?`, userID)
+	if err != nil {
+		return err
+	}
+	type pair struct{ localID, remoteParent string }
+	var pairs []pair
+	for rows.Next() {
+		var p pair
+		if err := rows.Scan(&p.localID, &p.remoteParent); err != nil {
+			rows.Close()
+			return err
+		}
+		pairs = append(pairs, p)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	parents := make(map[string]string, len(pairs))
+	for _, p := range pairs {
+		parents[p.localID] = p.remoteParent
+	}
+	for _, p := range pairs {
+		parent, err := d.GetNotebookIDByServerID(p.remoteParent)
+		if err != nil {
+			return err
+		}
+		if parent != "" && parent != p.remoteParent {
+			if _, err := d.db.Exec(`UPDATE notebooks SET parent_notebook_id = ? WHERE user_id = ? AND notebook_id = ?`, parent, userID, p.localID); err != nil {
+				return err
+			}
+		}
+	}
+	// Break self-parenting and longer local cycles left by older desktop data.
+	for _, p := range pairs {
+		seen := map[string]bool{}
+		cur := p.localID
+		for parents[cur] != "" {
+			if seen[cur] {
+				break
+			}
+			seen[cur] = true
+			next := parents[cur]
+			if seen[next] {
+				if _, err := d.db.Exec(`UPDATE notebooks SET parent_notebook_id = '' WHERE user_id = ? AND notebook_id = ?`, userID, cur); err != nil {
+					return err
+				}
+				parents[cur] = ""
+				break
+			}
+			cur = next
+		}
+	}
+	return nil
+}
+
 func (d *Database) GetNotebook(notebookID string) (*models.Notebook, error) {
 	row := d.db.QueryRow(`
 		SELECT _id, notebook_id, server_notebook_id, user_id, parent_notebook_id,
@@ -110,9 +214,10 @@ func (d *Database) UpdateNotebookForce(nb *models.Notebook) error {
 	_, err := d.db.Exec(`
 		UPDATE notebooks SET
 			title = ?, parent_notebook_id = ?, seq = ?, usn = ?,
+			number_notes = ?,
 			is_dirty = 0, local_is_new = 0, local_is_delete = 0
 		WHERE notebook_id = ?
-	`, nb.Title, nb.ParentNotebookID, nb.Seq, nb.Usn, nb.NotebookID)
+	`, nb.Title, nb.ParentNotebookID, nb.Seq, nb.Usn, nb.NumberNotes, nb.NotebookID)
 	return err
 }
 
@@ -240,8 +345,34 @@ func (d *Database) scanNotebooks(rows *sql.Rows) ([]*models.Notebook, error) {
 func (d *Database) MapNotebooks(notebooks []*models.Notebook) []*models.Notebook {
 	notebooksMap := make(map[string]*models.Notebook)
 	for _, nb := range notebooks {
+		// NumberNotes received from the server is metadata in the server's
+		// namespace. Recompute it from the local cache so the desktop UI always
+		// reflects the notes actually present locally.
+		if count, err := d.CountNotes(nb.NotebookID); err == nil {
+			nb.NumberNotes = count
+		}
 		nb.Subs = []*models.Notebook{}
 		notebooksMap[nb.NotebookID] = nb
+	}
+	// Corrupt/legacy data can contain self-parenting or cyclic notebook
+	// references. Such nodes would be unreachable from the tree roots and
+	// silently disappear from the desktop UI. Promote the node that closes each
+	// cycle to a root for display (the server snapshot remains untouched).
+	for _, nb := range notebooks {
+		seen := map[string]bool{}
+		cur := nb
+		for cur != nil && cur.ParentNotebookID != "" {
+			if seen[cur.NotebookID] {
+				break
+			}
+			seen[cur.NotebookID] = true
+			next := notebooksMap[cur.ParentNotebookID]
+			if next != nil && seen[next.NotebookID] {
+				cur.ParentNotebookID = ""
+				break
+			}
+			cur = next
+		}
 	}
 
 	var roots []*models.Notebook
@@ -277,9 +408,9 @@ func (d *Database) UpdateNotebookAfterSync(notebookID string, serverNb *models.N
 
 	_, err := d.db.Exec(`
 		UPDATE notebooks SET
-			server_notebook_id = ?, title = ?, parent_notebook_id = ?, seq = ?, usn = ?,
-			is_dirty = 0, local_is_new = 0
+		server_notebook_id = ?, title = ?, parent_notebook_id = ?, seq = ?, usn = ?, number_notes = ?,
+			is_dirty = 0, local_is_new = 0, local_is_delete = 0
 		WHERE notebook_id = ?
-	`, serverNb.NotebookID, serverNb.Title, localParentID, serverNb.Seq, serverNb.Usn, notebookID)
+	`, serverNb.NotebookID, serverNb.Title, localParentID, serverNb.Seq, serverNb.Usn, serverNb.NumberNotes, notebookID)
 	return err
 }

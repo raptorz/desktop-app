@@ -83,6 +83,11 @@ func (d *Database) GetNoteByServerID(serverNoteID string) (*models.Note, error) 
 	return d.scanNote(row)
 }
 
+func (d *Database) SetServerNoteID(noteID, serverNoteID string) error {
+	_, err := d.db.Exec(`UPDATE notes SET server_note_id = ? WHERE note_id = ?`, serverNoteID, noteID)
+	return err
+}
+
 func (d *Database) GetLocalNoteID(serverNoteID string) (string, error) {
 	row := d.db.QueryRow(`SELECT note_id FROM notes WHERE server_note_id = ?`, serverNoteID)
 	var noteID string
@@ -251,6 +256,53 @@ func (d *Database) GetDirtyNotes(userID string) ([]*models.Note, error) {
 	return d.scanNotes(rows)
 }
 
+// RequeueMissingDesktopNotes merges clean local notes absent from the current
+// server snapshot, regardless of which server database originally created
+// them. Only non-trashed notes are revived; locally deleted rows stay deleted.
+func (d *Database) RequeueMissingDesktopNotes(userID string, remoteIDs map[string]bool) error {
+	rows, err := d.db.Query(`
+		SELECT note_id, server_note_id FROM notes
+		WHERE user_id = ? AND is_dirty = 0 AND is_trash = 0
+	`, userID)
+	if err != nil {
+		return err
+	}
+	var missing, relink []string
+	for rows.Next() {
+		var localID, remoteID string
+		if err := rows.Scan(&localID, &remoteID); err != nil {
+			rows.Close()
+			return err
+		}
+		if remoteID == "" && remoteIDs[localID] {
+			relink = append(relink, localID)
+		} else if !remoteIDs[remoteID] {
+			missing = append(missing, localID)
+		}
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	for _, localID := range relink {
+		if _, err := d.db.Exec(`UPDATE notes SET server_note_id = ?, local_is_delete = 0 WHERE user_id = ? AND note_id = ?`, localID, userID, localID); err != nil {
+			return err
+		}
+	}
+	for _, localID := range missing {
+		if _, err := d.db.Exec(`UPDATE notes SET server_note_id = '', is_dirty = 1, local_is_new = 1, local_is_delete = 0 WHERE note_id = ? AND user_id = ?`, localID, userID); err != nil {
+			return err
+		}
+	}
+	for remoteID := range remoteIDs {
+		if _, err := d.db.Exec(`UPDATE notes SET local_is_delete = 0 WHERE user_id = ? AND server_note_id = ? AND is_dirty = 0 AND is_trash = 0`, userID, remoteID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (d *Database) UpdateNote(note *models.Note) error {
 	tagsJSON, _ := json.Marshal(note.Tags)
 
@@ -270,6 +322,14 @@ func (d *Database) SetNoteNotebook(noteID, notebookID string) error {
 
 func (d *Database) UpdateNoteForce(note *models.Note, needReloadContent bool) error {
 	tagsJSON, _ := json.Marshal(note.Tags)
+	notebookID := note.NotebookID
+	if notebookID == "" {
+		// Metadata-only server responses may omit NotebookId. Preserve the
+		// existing local relationship instead of violating the FK constraint.
+		if existing, _ := d.GetNote(note.NoteID); existing != nil {
+			notebookID = existing.NotebookID
+		}
+	}
 
 	initSync := note.InitSync
 	if !needReloadContent {
@@ -278,12 +338,12 @@ func (d *Database) UpdateNoteForce(note *models.Note, needReloadContent bool) er
 
 	_, err := d.db.Exec(`
 		UPDATE notes SET
-			title = ?, desc = ?, abstract = ?, img_src = ?, tags = ?,
+			notebook_id = ?, title = ?, desc = ?, abstract = ?, img_src = ?, tags = ?,
 			is_markdown = ?, is_trash = ?, is_blog = ?, is_star = ?, usn = ?,
 			is_dirty = 0, content_is_dirty = 0, local_is_new = 0, local_is_delete = 0, init_sync = ?,
 			err = ''
 		WHERE note_id = ?
-	`, note.Title, note.Desc, note.Abstract, note.ImgSrc, string(tagsJSON),
+	`, notebookID, note.Title, note.Desc, note.Abstract, note.ImgSrc, string(tagsJSON),
 		note.IsMarkdown, note.IsTrash, note.IsBlog, note.IsStar, note.Usn, initSync, note.NoteID)
 	return err
 }
@@ -391,6 +451,13 @@ func (d *Database) CountNotes(notebookID string) (int, error) {
 	return count, err
 }
 
+func (d *Database) CountVisibleNotes(userID string) (int, error) {
+	row := d.db.QueryRow(`SELECT COUNT(*) FROM notes WHERE user_id = ? AND is_trash = 0 AND (local_is_delete = 0 OR local_is_delete IS NULL)`, userID)
+	var count int
+	err := row.Scan(&count)
+	return count, err
+}
+
 func (d *Database) CountStarredNotes(userID string) (int, error) {
 	row := d.db.QueryRow(`
 		SELECT COUNT(*) FROM notes
@@ -431,7 +498,7 @@ func (d *Database) UpdateNoteAfterSync(note *models.Note, isAdd bool) error {
 	_, err := d.db.Exec(`
 		UPDATE notes SET
 			server_note_id = ?, usn = ?, title = ?, tags = ?, is_star = ?,
-			is_dirty = 0, local_is_new = 0, content_is_dirty = 0, init_sync = 0, err = ''
+			is_dirty = 0, local_is_new = 0, local_is_delete = 0, content_is_dirty = 0, init_sync = 0, err = ''
 		WHERE note_id = ?
 	`, note.ServerNoteID, note.Usn, note.Title, string(tagsJSON), note.IsStar, note.NoteID)
 	return err

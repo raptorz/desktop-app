@@ -32,6 +32,15 @@ func TestCheckAPIResponseRejectsFailedServerResponse(t *testing.T) {
 	}
 }
 
+func TestSyncListRejectsErrorEnvelope(t *testing.T) {
+	if err := checkSyncListResponse(200, []byte(`{"Ok":false,"Msg":"NOTLOGIN"}`)); err == nil {
+		t.Fatal("authentication error must not be treated as an empty sync page")
+	}
+	if err := checkSyncListResponse(200, []byte(`[]`)); err != nil {
+		t.Fatalf("empty sync page should be valid: %v", err)
+	}
+}
+
 func TestDecodeNoteResponseSupportsLeanoteDirectAndWrappedResponses(t *testing.T) {
 	for _, body := range []string{
 		`{"NoteId":"507f1f77bcf86cd799439011","Title":"direct","Usn":4}`,

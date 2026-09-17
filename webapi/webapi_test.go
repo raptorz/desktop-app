@@ -193,7 +193,7 @@ func TestNoteLifecycleRoundtrip(t *testing.T) {
 	userID, notebookID := e.login(t)
 
 	var loginResp map[string]any
-	e.postJSON(t, "/api2/doLogin", url.Values{"email": {"tester"}, "pwd": {"secret"}}, &loginResp)
+	e.postJSON(t, "/api2/auth/session", url.Values{"email": {"tester"}, "pwd": {"secret"}}, &loginResp)
 	if loginResp["Ok"] != true {
 		t.Fatalf("login failed: %v", loginResp)
 	}
@@ -592,7 +592,7 @@ func TestRemoteLoginDoesNotUseMatchingLocalAccount(t *testing.T) {
 		Ok  bool
 		Msg string
 	}
-	e.postJSON(t, "/api2/doLogin", url.Values{"email": {"same@example.test"}, "pwd": {"secret"}}, &result)
+	e.postJSON(t, "/api2/auth/session", url.Values{"email": {"same@example.test"}, "pwd": {"secret"}}, &result)
 	if result.Ok || result.Msg != "offline" {
 		t.Fatalf("remote login unexpectedly used local account: %+v", result)
 	}

@@ -266,7 +266,15 @@ func (a *App) FullSyncForce() map[string]interface{} {
 	if err != nil {
 		result = map[string]interface{}{"Ok": false, "Msg": err.Error()}
 	}
-	a.emitSyncFinished(result)
+	// Mark the event so the SPA can distinguish a full-sync success (which
+	// gets a green confirmation) from an incremental sync (which only clears
+	// its pending marker). Keep the Wails method return payload unchanged.
+	eventResult := map[string]interface{}{}
+	for key, value := range result {
+		eventResult[key] = value
+	}
+	eventResult["Full"] = true
+	a.emitSyncFinished(eventResult)
 	return result
 }
 

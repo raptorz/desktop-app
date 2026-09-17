@@ -343,6 +343,121 @@ func TestUpdateNoteForcePreservesCachedContent(t *testing.T) {
 	}
 }
 
+func TestRequeueMissingDesktopNotes(t *testing.T) {
+	database, err := NewInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if err := database.InsertUser(&models.User{ID: "user1", Username: "tester"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.InsertNotebook(&models.Notebook{ID: "nb1", NotebookID: "book1", UserID: "user1"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, note := range []*models.Note{
+		{ID: "a", NoteID: "local-a", ServerNoteID: "missing-a", NotebookID: "book1", UserID: "user1"},
+		{ID: "b", NoteID: "local-b", ServerNoteID: "present-b", NotebookID: "book1", UserID: "user1"},
+		{ID: "c", NoteID: "server-c", ServerNoteID: "server-c", NotebookID: "book1", UserID: "user1"},
+	} {
+		if err := database.InsertNote(note); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := database.RequeueMissingDesktopNotes("user1", map[string]bool{"present-b": true}); err != nil {
+		t.Fatal(err)
+	}
+	a, _ := database.GetNote("local-a")
+	b, _ := database.GetNote("local-b")
+	c, _ := database.GetNote("server-c")
+	if !a.IsDirty || !a.LocalIsNew || a.ServerNoteID != "" || b.IsDirty || !c.IsDirty || !c.LocalIsNew || c.ServerNoteID != "" {
+		t.Fatalf("requeue mismatch: a=%+v b=%+v c=%+v", a, b, c)
+	}
+}
+
+func TestReconcileFullNotebooksRequeuesDirtyAndHiddenRows(t *testing.T) {
+	database, err := NewInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if err := database.InsertUser(&models.User{ID: "user1", Username: "tester"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, nb := range []*models.Notebook{
+		{ID: "a", NotebookID: "dirty-book", ServerNotebookID: "old-dirty", UserID: "user1", IsDirty: true, Title: "Edited"},
+		{ID: "b", NotebookID: "hidden-book", ServerNotebookID: "old-hidden", UserID: "user1", LocalIsDelete: true, Title: "Hidden"},
+	} {
+		if err := database.InsertNotebook(nb); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := database.ReconcileFullNotebooks("user1", map[string]bool{}); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"dirty-book", "hidden-book"} {
+		nb, err := database.GetNotebook(id)
+		if err != nil || nb == nil || nb.ServerNotebookID != "" || !nb.IsDirty || !nb.LocalIsNew || nb.LocalIsDelete {
+			t.Fatalf("notebook %s not queued for merge: %+v %v", id, nb, err)
+		}
+	}
+}
+
+func TestCleanupUnusedTagsRemovesEmptyTags(t *testing.T) {
+	database, err := NewInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if err := database.InsertUser(&models.User{ID: "user1", Username: "tester"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, tag := range []*models.Tag{{ID: "empty", Tag: "", UserID: "user1"}, {ID: "unused", Tag: "unused", UserID: "user1"}, {ID: "used", Tag: "used", UserID: "user1"}} {
+		if err := database.InsertTag(tag); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := database.InsertNotebook(&models.Notebook{ID: "nb", NotebookID: "book", UserID: "user1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.InsertNote(&models.Note{ID: "n", NoteID: "note", NotebookID: "book", UserID: "user1", Tags: []string{"used"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.CleanupUnusedTags("user1"); err != nil {
+		t.Fatal(err)
+	}
+	tags, err := database.GetTags("user1")
+	if err != nil || len(tags) != 1 || tags[0].Tag != "used" || tags[0].Count != 1 {
+		t.Fatalf("tags after cleanup: %+v %v", tags, err)
+	}
+}
+
+func TestMapNotebooksKeepsCyclicNotebooksVisible(t *testing.T) {
+	database, err := NewInMemory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	items := []*models.Notebook{
+		{NotebookID: "root", Title: "Root"},
+		{NotebookID: "self", ParentNotebookID: "self", Title: "Self"},
+		{NotebookID: "child", ParentNotebookID: "self", Title: "Child"},
+	}
+	mapped := database.MapNotebooks(items)
+	seen := map[string]bool{}
+	var walk func([]*models.Notebook)
+	walk = func(nodes []*models.Notebook) {
+		for _, n := range nodes {
+			seen[n.NotebookID] = true
+			walk(n.Subs)
+		}
+	}
+	walk(mapped)
+	if len(seen) != len(items) {
+		t.Fatalf("cyclic notebooks disappeared: roots=%+v seen=%v", mapped, seen)
+	}
+}
+
 func TestDeleteNote(t *testing.T) {
 	database, err := NewInMemory()
 	if err != nil {

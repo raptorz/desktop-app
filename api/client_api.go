@@ -95,6 +95,9 @@ func (c *Client) GetLastSyncState() (*LastSyncStateResponse, error) {
 	if err := json.Unmarshal(resp.Body(), &state); err != nil {
 		return nil, err
 	}
+	if resp.IsError() || state.Msg != "" {
+		return nil, fmt.Errorf("get sync state failed: %s", string(resp.Body()))
+	}
 
 	return &state, nil
 }
@@ -108,6 +111,9 @@ func (c *Client) GetSyncNotebooks(afterUsn int64, maxEntry int) ([]*models.Noteb
 		return nil, err
 	}
 
+	if err := checkSyncListResponse(resp.StatusCode(), resp.Body()); err != nil {
+		return nil, err
+	}
 	var notebooks []*models.Notebook
 	if err := json.Unmarshal(resp.Body(), &notebooks); err != nil {
 		return nil, err
@@ -125,6 +131,9 @@ func (c *Client) GetSyncNotes(afterUsn int64, maxEntry int) ([]*models.Note, err
 		return nil, err
 	}
 
+	if err := checkSyncListResponse(resp.StatusCode(), resp.Body()); err != nil {
+		return nil, err
+	}
 	var notes []*models.Note
 	if err := json.Unmarshal(resp.Body(), &notes); err != nil {
 		return nil, err
@@ -142,12 +151,23 @@ func (c *Client) GetSyncTags(afterUsn int64, maxEntry int) ([]*models.Tag, error
 		return nil, err
 	}
 
+	if err := checkSyncListResponse(resp.StatusCode(), resp.Body()); err != nil {
+		return nil, err
+	}
 	var tags []*models.Tag
 	if err := json.Unmarshal(resp.Body(), &tags); err != nil {
 		return nil, err
 	}
 
 	return tags, nil
+}
+
+func checkSyncListResponse(status int, body []byte) error {
+	trimmed := strings.TrimSpace(string(body))
+	if status < 200 || status >= 300 || !strings.HasPrefix(trimmed, "[") {
+		return fmt.Errorf("sync list request failed (HTTP %d): %s", status, trimmed)
+	}
+	return nil
 }
 
 func (c *Client) GetNoteContent(noteID string) (string, error) {
@@ -158,6 +178,10 @@ func (c *Client) GetNoteContent(noteID string) (string, error) {
 		return "", err
 	}
 
+	var fields map[string]json.RawMessage
+	if resp.IsError() || json.Unmarshal(resp.Body(), &fields) != nil || fields["Content"] == nil {
+		return "", fmt.Errorf("get note content %s failed: %s", noteID, string(resp.Body()))
+	}
 	var contentResp models.NoteContentAPI
 	if err := json.Unmarshal(resp.Body(), &contentResp); err != nil {
 		return "", err
@@ -453,7 +477,7 @@ func (c *Client) AddNote(note *models.Note) (*models.Note, error) {
 		"FileDatas":  note.FileDatas,
 	}
 
-	resp, err := c.post("client/note/add", data, nil)
+	resp, err := c.post("note/addNote", data, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -482,7 +506,7 @@ func (c *Client) UpdateNote(note *models.Note) (*models.Note, error) {
 		}
 	}
 
-	resp, err := c.post("client/note/update", data, nil)
+	resp, err := c.post("note/updateNote", data, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -511,7 +535,7 @@ func (c *Client) DeleteTrash(note *models.Note) (*APIResponse, error) {
 }
 
 func (c *Client) AddTag(title string) (*models.Tag, error) {
-	resp, err := c.post("client/tag/add", map[string]string{
+	resp, err := c.post("tag/addTag", map[string]string{
 		"tag": title,
 	}, nil)
 	if err != nil {
@@ -527,7 +551,7 @@ func (c *Client) AddTag(title string) (*models.Tag, error) {
 }
 
 func (c *Client) DeleteTag(tag *models.Tag) (*APIResponse, error) {
-	resp, err := c.post("client/tag/delete", map[string]string{
+	resp, err := c.post("tag/deleteTag", map[string]string{
 		"tag": tag.Tag,
 		"usn": strconv.FormatInt(tag.Usn, 10),
 	}, nil)

@@ -186,7 +186,7 @@ func (h *Handler) route(w http.ResponseWriter, r *http.Request) bool {
 		h.pasteImage(w, r)
 	case path == "/api2/file/getImage":
 		h.serveImage(w, r)
-	case path == "/api2/doLogin":
+	case path == "/api2/auth/session":
 		if host := h.form(r, "host"); host != "" && h.Proxy != nil {
 			h.Proxy.SetHost(host)
 		}

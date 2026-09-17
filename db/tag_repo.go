@@ -28,7 +28,7 @@ func (d *Database) InsertTagTx(tx *sql.Tx, tag *models.Tag) error {
 func (d *Database) GetTags(userID string) ([]*models.Tag, error) {
 	rows, err := d.db.Query(`
 		SELECT _id, tag, user_id, count, usn, is_dirty, local_is_delete, created_time, updated_time
-		FROM tags WHERE user_id = ? AND (local_is_delete = 0 OR local_is_delete IS NULL)
+		FROM tags WHERE user_id = ? AND tag != '' AND (local_is_delete = 0 OR local_is_delete IS NULL)
 	`, userID)
 	if err != nil {
 		return nil, err
@@ -36,6 +36,33 @@ func (d *Database) GetTags(userID string) ([]*models.Tag, error) {
 	defer rows.Close()
 
 	return d.scanTags(rows)
+}
+
+// CleanupUnusedTags removes empty and unreferenced tags after a full merge.
+// Counts in old caches can be stale, so calculate them from the visible notes
+// instead of trusting the stored count.
+func (d *Database) CleanupUnusedTags(userID string) error {
+	tags, err := d.GetTags(userID)
+	if err != nil {
+		return err
+	}
+	for _, tag := range tags {
+		count, err := d.CountNotesByTag(userID, tag.Tag)
+		if err != nil {
+			return err
+		}
+		if count == 0 {
+			if _, err := d.db.Exec(`DELETE FROM tags WHERE user_id = ? AND tag = ?`, userID, tag.Tag); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := d.UpdateTagCount(tag.Tag, count); err != nil {
+			return err
+		}
+	}
+	_, err = d.db.Exec(`DELETE FROM tags WHERE user_id = ? AND tag = ''`, userID)
+	return err
 }
 
 func (d *Database) GetTag(userID, tagName string) (*models.Tag, error) {

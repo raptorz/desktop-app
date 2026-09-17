@@ -75,7 +75,7 @@ func (s *SyncService) FullSync() (*models.SyncInfo, error) {
 	s.api.SetHost(user.Host)
 	s.api.SetToken(user.Token)
 
-	lastUsn, notebookUsn, noteUsn, tagUsn, err := s.db.GetAllLastSyncState(user.ID)
+	lastUsn, _, _, _, err := s.db.GetAllLastSyncState(user.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -88,19 +88,19 @@ func (s *SyncService) FullSync() (*models.SyncInfo, error) {
 	logrus.Debugf("Server LastSyncUsn: %d, Local: %d", serverState.LastSyncUsn, lastUsn)
 
 	s.emitProgress("notebooks", 0, 100)
-	if err := s.syncNotebooks(notebookUsn, syncInfo); err != nil {
+	if err := s.syncNotebooks(-1, syncInfo); err != nil {
 		logrus.Errorf("Sync notebooks error: %v", err)
 		return nil, err
 	}
 
 	s.emitProgress("notes", 20, 100)
-	if err := s.syncNotes(noteUsn, syncInfo); err != nil {
+	if err := s.syncNotes(-1, syncInfo); err != nil {
 		logrus.Errorf("Sync notes error: %v", err)
 		return nil, err
 	}
 
 	s.emitProgress("tags", 40, 100)
-	if err := s.syncTags(tagUsn, syncInfo); err != nil {
+	if err := s.syncTags(-1, syncInfo); err != nil {
 		logrus.Errorf("Sync tags error: %v", err)
 		return nil, err
 	}
@@ -115,6 +115,9 @@ func (s *SyncService) FullSync() (*models.SyncInfo, error) {
 	if err := s.syncImagesAndAttachs(syncInfo); err != nil {
 		logrus.Errorf("Sync images/attachs error: %v", err)
 		return nil, err
+	}
+	if merged, err := s.db.CountVisibleNotes(user.ID); err == nil {
+		logrus.Infof("Full sync merged notes available locally: %d", merged)
 	}
 
 	if err := s.db.UpdateUserSyncState(user.ID, map[string]int64{
@@ -168,20 +171,36 @@ func (s *SyncService) IncrSync() (*models.SyncInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	if serverState.LastSyncUsn > lastUsn {
+	if serverState.LastSyncUsn < lastUsn {
+		logrus.Warnf("Server sync cursor moved backwards (%d -> %d); reconciling full snapshot", lastUsn, serverState.LastSyncUsn)
+		if err := s.syncNotebooks(-1, syncInfo); err != nil {
+			return nil, err
+		}
+		if err := s.syncNotes(-1, syncInfo); err != nil {
+			return nil, err
+		}
+		if err := s.syncTags(-1, syncInfo); err != nil {
+			return nil, err
+		}
+		if err := s.db.UpdateUserSyncState(user.ID, map[string]int64{"last_sync_usn": serverState.LastSyncUsn}); err != nil {
+			return nil, err
+		}
+	} else if serverState.LastSyncUsn > lastUsn {
 		logrus.Debugf("Server has updates, pulling...")
 
 		if err := s.syncNotebooks(lastUsn, syncInfo); err != nil {
 			logrus.Errorf("Sync notebooks error: %v", err)
+			return nil, err
 		}
 
 		if err := s.syncNotes(lastUsn, syncInfo); err != nil {
 			logrus.Errorf("Sync notes error: %v", err)
+			return nil, err
 		}
 
 		if err := s.syncTags(lastUsn, syncInfo); err != nil {
 			logrus.Errorf("Sync tags error: %v", err)
+			return nil, err
 		}
 	}
 

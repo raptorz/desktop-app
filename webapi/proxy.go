@@ -29,6 +29,8 @@ type ServerProxy struct {
 	email         string
 	pwd           string
 	sessionOk     bool
+	token         string
+	remoteUser    *models.User
 	versionNotice string
 }
 
@@ -58,6 +60,8 @@ func (p *ServerProxy) SetHost(host string) {
 	}
 	p.DB.SetConfig("host", strings.TrimRight(host, "/"))
 	p.sessionOk = false
+	p.token = ""
+	p.remoteUser = nil
 }
 
 func (p *ServerProxy) configured() bool {
@@ -68,6 +72,11 @@ func (p *ServerProxy) call(method, path string, form url.Values, file *multipart
 	req, err := http.NewRequest(method, p.host()+path, nil)
 	if err != nil {
 		return nil, "", err
+	}
+	if p.token != "" {
+		q := req.URL.Query()
+		q.Set("token", p.token)
+		req.URL.RawQuery = q.Encode()
 	}
 	if file != nil {
 		body := &bytes.Buffer{}
@@ -120,6 +129,30 @@ func (p *ServerProxy) call(method, path string, form url.Values, file *multipart
 	return data, resp.Header.Get("Content-Type"), err
 }
 
+func (p *ServerProxy) callJSON(method, path string, payload any) ([]byte, string, error) {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, "", err
+	}
+	req, err := http.NewRequest(method, p.host()+path, bytes.NewReader(body))
+	if err != nil {
+		return nil, "", err
+	}
+	if p.token != "" {
+		q := req.URL.Query()
+		q.Set("token", p.token)
+		req.URL.RawQuery = q.Encode()
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return nil, "", err
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(resp.Body)
+	return data, resp.Header.Get("Content-Type"), err
+}
+
 func parseRe(data []byte) (ok bool, msg string, parsed bool) {
 	var re struct {
 		Ok  *bool `json:"Ok"`
@@ -155,8 +188,7 @@ func (p *ServerProxy) LoginServer(email, pwd string) (bool, string) {
 	if !p.configured() {
 		return false, "offline"
 	}
-	form := url.Values{"email": {email}, "pwd": {pwd}}
-	data, _, err := p.call(http.MethodPost, "/api2/doLogin", form, nil)
+	data, _, err := p.callJSON(http.MethodPost, "/api2/auth/login", map[string]string{"email": email, "pwd": pwd})
 	if err != nil {
 		return false, "offline"
 	}
@@ -167,7 +199,17 @@ func (p *ServerProxy) LoginServer(email, pwd string) (bool, string) {
 	if !ok {
 		return false, msg
 	}
-	p.email, p.pwd, p.sessionOk = email, pwd, true
+	var auth struct {
+		Token    string `json:"Token"`
+		UserID   string `json:"UserId"`
+		Username string `json:"Username"`
+		Email    string `json:"Email"`
+	}
+	_ = json.Unmarshal(data, &auth)
+	p.email, p.pwd, p.token, p.sessionOk = email, pwd, auth.Token, true
+	if auth.UserID != "" {
+		p.remoteUser = &models.User{ID: auth.UserID, Username: auth.Username, Email: auth.Email, IsActive: true}
+	}
 	p.versionNotice = p.checkServerVersion()
 	return true, ""
 }
@@ -247,7 +289,7 @@ func (p *ServerProxy) FetchAPIToken(email, pwd string) string {
 	if !p.configured() {
 		return ""
 	}
-	data, _, err := p.call(http.MethodPost, "/api2/auth/login", url.Values{"email": {email}, "pwd": {pwd}}, nil)
+	data, _, err := p.callJSON(http.MethodPost, "/api2/auth/login", map[string]string{"email": email, "pwd": pwd})
 	if err != nil {
 		return ""
 	}
@@ -262,36 +304,100 @@ func (p *ServerProxy) FetchAPIToken(email, pwd string) string {
 }
 
 func (p *ServerProxy) fetchServerUser() *models.User {
-	data, _, err := p.call(http.MethodGet, "/api2/web/bootstrap", nil, nil)
+	// API2 token authentication does not create a browser session. Fetch the
+	// profile through the token-authenticated endpoint instead of Bootstrap.
+	if !p.ensureSession() {
+		return nil
+	}
+	data, _, err := p.call(http.MethodGet, "/api2/user/info", nil, nil)
 	if err != nil {
 		return nil
 	}
 	var payload struct {
-		IsAdmin bool
-		User    struct {
-			UserId   string
-			Username string
-			Email    string
-			Logo     string
-		}
+		UserId   string
+		Username string
+		Email    string
+		Logo     string
 	}
-	if json.Unmarshal(data, &payload) != nil || payload.User.UserId == "" {
+	if json.Unmarshal(data, &payload) != nil || payload.UserId == "" {
 		return nil
 	}
-	p.DB.SetConfig(adminCacheKey(p.host(), payload.User.UserId), strconv.FormatBool(payload.IsAdmin))
-	logo := strings.TrimSpace(payload.User.Logo)
-	if strings.HasPrefix(logo, "/") {
-		logo = strings.TrimRight(p.host(), "/") + logo
-	}
-	if logo != "" {
-		p.DB.SetConfig("logo:"+payload.User.UserId, logo)
+	if !p.cacheAvatar(payload.UserId, payload.Logo) {
+		return nil
 	}
 	return &models.User{
-		ID:       payload.User.UserId,
-		Username: payload.User.Username,
-		Email:    payload.User.Email,
+		ID:       payload.UserId,
+		Username: payload.Username,
+		Email:    payload.Email,
 		IsActive: true,
 	}
+}
+
+func (p *ServerProxy) cacheAvatar(userID, logo string) bool {
+	logo = strings.TrimSpace(logo)
+	if logo == "" {
+		p.DB.SetConfig("logo:"+userID, "")
+		p.DB.SetConfig("logo_source:"+userID, "")
+		return true
+	}
+	active, _ := p.DB.GetActiveUser()
+	if active == nil || active.ID != userID {
+		return true // login has not yet adopted this account locally
+	}
+	if source, _ := p.DB.GetConfig("logo_source:" + userID); source == logo {
+		if cached, _ := p.DB.GetConfig("logo:" + userID); cached != "" {
+			if strings.HasPrefix(cached, "/api2/file/getImage?fileId=") {
+				fileID := strings.TrimPrefix(cached, "/api2/file/getImage?fileId=")
+				if path, err := p.Files.GetImage(fileID); err == nil && path != "" {
+					if _, err := os.Stat(path); err == nil {
+						return true
+					}
+				}
+			} else {
+				return true
+			}
+		}
+	}
+	path := strings.TrimLeft(logo, "/")
+	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
+		// A remote URL is usable online, but only same-origin paths are cached.
+		p.DB.SetConfig("logo:"+userID, logo)
+		return true
+	}
+	if !strings.HasPrefix(path, "public/upload/") {
+		return false
+	}
+	resp, err := p.client.Get(p.host() + "/" + path)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || !strings.HasPrefix(resp.Header.Get("Content-Type"), "image/") {
+		return false
+	}
+	dir := p.Files.GetUserImageDir(userID)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return false
+	}
+	file, err := os.CreateTemp(dir, "avatar-*")
+	if err != nil {
+		return false
+	}
+	name := file.Name()
+	_, copyErr := io.Copy(file, io.LimitReader(resp.Body, 10<<20))
+	closeErr := file.Close()
+	if copyErr != nil || closeErr != nil {
+		os.Remove(name)
+		return false
+	}
+	fileID := utils.ObjectId()
+	if err := p.Files.AddImageForce(fileID, name); err != nil {
+		os.Remove(name)
+		return false
+	}
+	p.DB.SetConfig("logo:"+userID, "/api2/file/getImage?fileId="+fileID)
+	p.DB.SetConfig("logo_source:"+userID, logo)
+	return true
 }
 
 // RefreshUserProfile refreshes profile metadata cached by the local bridge.
@@ -400,6 +506,8 @@ func (p *ServerProxy) Logout() {
 	jar, _ := cookiejar.New(nil)
 	p.client.Jar = jar
 	p.sessionOk = false
+	p.token = ""
+	p.remoteUser = nil
 	// Credentials are only a session aid for reconnecting while logged in.
 	// Keeping them after logout would let a later proxied request silently
 	// authenticate again without an explicit login.
@@ -412,7 +520,20 @@ func (p *ServerProxy) Forward(w http.ResponseWriter, r *http.Request, form url.V
 	if !p.configured() {
 		return false
 	}
-	data, contentType, err := p.call(r.Method, r.URL.RequestURI(), form, file)
+	var data []byte
+	var contentType string
+	var err error
+	if file == nil && strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") && form != nil {
+		payload := make(map[string]string, len(form))
+		for key, values := range form {
+			if len(values) > 0 {
+				payload[key] = values[0]
+			}
+		}
+		data, contentType, err = p.callJSON(r.Method, r.URL.RequestURI(), payload)
+	} else {
+		data, contentType, err = p.call(r.Method, r.URL.RequestURI(), form, file)
+	}
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.Write([]byte(`{"Ok":false,"Msg":"offline"}`))
@@ -425,7 +546,7 @@ func (p *ServerProxy) Forward(w http.ResponseWriter, r *http.Request, form url.V
 	return true
 }
 
-var guestPaths = []string{"/captcha/", "/api2/doRegister", "/api2/doFindPassword", "/api2/findPasswordUpdate", "/api2/web/verifyEmail"}
+var guestPaths = []string{"/captcha/", "/api2/auth/register", "/api2/auth/password/request", "/api2/auth/password/reset", "/api2/web/verifyEmail"}
 
 func (p *ServerProxy) isGuestPath(path string) bool {
 	for _, prefix := range guestPaths {
@@ -447,14 +568,14 @@ func (h *Handler) routeProxied(w http.ResponseWriter, r *http.Request) bool {
 		strings.HasPrefix(path, "/api2/user/") || strings.HasPrefix(path, "/captcha/") ||
 		path == "/api2/groups" || path == "/api2/admin/data" || path == "/api2/avatar" ||
 		path == "/api2/web/shareMembers" || path == "/api2/web/groups" || path == "/api2/web/emailChange" ||
-		path == "/api2/web/verifyEmail" || path == "/api2/doRegister" || path == "/api2/doFindPassword" ||
-		path == "/api2/findPasswordUpdate" || path == "/api2/file/uploadAvatar" ||
+		path == "/api2/web/verifyEmail" || path == "/api2/auth/register" || path == "/api2/auth/password/request" ||
+		path == "/api2/auth/password/reset" || path == "/api2/auth/login" || path == "/api2/file/uploadAvatar" ||
 		strings.HasPrefix(path, "/api2/web/admin") || path == "/api2/admin/data"
 	if !proxied {
 		return false
 	}
 
-	if path == "/api2/doLogin" || path == "/api2/doRegister" || path == "/api2/doFindPassword" {
+	if path == "/api2/auth/login" || path == "/api2/auth/register" || path == "/api2/auth/password/request" || path == "/api2/auth/password/reset" {
 		if host := h.form(r, "host"); host != "" {
 			proxy.SetHost(host)
 		}
@@ -520,6 +641,9 @@ func (h *Handler) proxyAvatar(w http.ResponseWriter, r *http.Request, fh *multip
 	defer os.Remove(tmp)
 	if result, err := h.Files.CopyFile(tmp, true); err == nil {
 		fileID, _ := result["FileId"].(string)
+		if fileID == "" {
+			fileID, _ = result["Id"].(string)
+		}
 		h.DB.SetConfig("logo:"+user.ID, "/api2/file/getImage?fileId="+fileID)
 	}
 	return true

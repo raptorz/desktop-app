@@ -19,6 +19,7 @@ func (s *SyncService) syncNotebooks(afterUsn int64, syncInfo *models.SyncInfo) e
 	logrus.Info("Syncing notebooks...")
 
 	currentUsn := afterUsn
+	remoteIDs := make(map[string]bool)
 
 	for {
 		notebooks, err := s.api.GetSyncNotebooks(currentUsn, s.maxEntry)
@@ -31,16 +32,26 @@ func (s *SyncService) syncNotebooks(afterUsn int64, syncInfo *models.SyncInfo) e
 		}
 
 		for _, nb := range notebooks {
+			// A complete snapshot is a union merge. A remote tombstone must not
+			// erase the only remaining local copy after a database switch.
+			if afterUsn < 0 && nb.IsDeleted {
+				continue
+			}
+			if !nb.IsDeleted {
+				remoteIDs[nb.NotebookID] = true
+			}
 			if err := s.processNotebookSync(nb, syncInfo); err != nil {
-				logrus.Errorf("Process notebook error: %v", err)
+				return fmt.Errorf("process remote notebook %s: %w", nb.NotebookID, err)
 			}
 		}
 
 		if len(notebooks) > 0 {
 			currentUsn = notebooks[len(notebooks)-1].Usn
-			s.db.UpdateUserSyncState(s.db.GetCurrentUserID(), map[string]int64{
+			if err := s.db.UpdateUserSyncState(s.db.GetCurrentUserID(), map[string]int64{
 				"notebook_usn": currentUsn,
-			})
+			}); err != nil {
+				return err
+			}
 		}
 
 		if len(notebooks) < s.maxEntry {
@@ -48,6 +59,15 @@ func (s *SyncService) syncNotebooks(afterUsn int64, syncInfo *models.SyncInfo) e
 		}
 
 		time.Sleep(500 * time.Millisecond)
+	}
+	if afterUsn < 0 {
+		logrus.Infof("Full notebook snapshot received: %d", len(remoteIDs))
+		if err := s.db.ReconcileFullNotebooks(s.db.GetCurrentUserID(), remoteIDs); err != nil {
+			return err
+		}
+		if err := s.db.RestoreNotebookParents(s.db.GetCurrentUserID()); err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -67,7 +87,7 @@ func (s *SyncService) processNotebookSync(serverNb *models.Notebook, syncInfo *m
 		}
 	}
 	if serverNb.IsDeleted {
-		localID, _ := s.db.GetLocalNoteID(serverNb.NotebookID)
+		localID, _ := s.db.GetNotebookIDByServerID(serverNb.NotebookID)
 		if localID != "" {
 			s.db.DeleteNotebookForce(localID)
 			syncInfo.Notebook.Deletes = append(syncInfo.Notebook.Deletes, localID)
@@ -88,8 +108,24 @@ func (s *SyncService) processNotebookSync(serverNb *models.Notebook, syncInfo *m
 		syncInfo.Notebook.Adds = append(syncInfo.Notebook.Adds, created.NotebookID)
 		return nil
 	}
+	// UpdateNotebookForce addresses rows by the local notebook ID. Preserve
+	// the remote ID only for lookup and translate the primary key before the
+	// local update.
+	serverNbCopy := *serverNb
+	serverNbCopy.NotebookID = localNb.NotebookID
+	serverNb = &serverNbCopy
 
 	if localNb.Usn == serverNb.Usn {
+		// USN equality only means the server did not advance its cursor; it
+		// does not guarantee that this cache row has the same parent metadata.
+		// This matters after switching databases: a server root (empty parent)
+		// can still have a stale local self-parent and disappear from the tree.
+		if !localNb.IsDirty && (localNb.NumberNotes != serverNb.NumberNotes ||
+			localNb.ParentNotebookID != serverNb.ParentNotebookID ||
+			localNb.Title != serverNb.Title || localNb.Seq != serverNb.Seq ||
+			localNb.LocalIsDelete) {
+			return s.db.UpdateNotebookForce(serverNb)
+		}
 		return nil
 	}
 
@@ -100,6 +136,7 @@ func (s *SyncService) syncNotes(afterUsn int64, syncInfo *models.SyncInfo) error
 	logrus.Info("Syncing notes...")
 
 	currentUsn := afterUsn
+	remoteIDs := make(map[string]bool)
 
 	for {
 		notes, err := s.api.GetSyncNotes(currentUsn, s.maxEntry)
@@ -112,13 +149,22 @@ func (s *SyncService) syncNotes(afterUsn int64, syncInfo *models.SyncInfo) error
 		}
 
 		for _, note := range notes {
+			if afterUsn < 0 && note.IsDeleted {
+				continue
+			}
+			if !note.IsDeleted {
+				remoteIDs[note.NoteID] = true
+			}
 			if err := s.processNoteSync(note, syncInfo); err != nil {
-				logrus.Errorf("Process note error: %v", err)
+				return fmt.Errorf("process remote note %s: %w", note.NoteID, err)
 			}
 		}
 
 		if len(notes) > 0 {
 			currentUsn = notes[len(notes)-1].Usn
+			if err := s.db.UpdateUserSyncState(s.db.GetCurrentUserID(), map[string]int64{"note_usn": currentUsn}); err != nil {
+				return err
+			}
 		}
 
 		if len(notes) < s.maxEntry {
@@ -127,11 +173,18 @@ func (s *SyncService) syncNotes(afterUsn int64, syncInfo *models.SyncInfo) error
 
 		time.Sleep(500 * time.Millisecond)
 	}
+	if afterUsn < 0 {
+		logrus.Infof("Full note snapshot received: %d", len(remoteIDs))
+		if err := s.db.RequeueMissingDesktopNotes(s.db.GetCurrentUserID(), remoteIDs); err != nil {
+			return err
+		}
+	}
 
 	return nil
 }
 
 func (s *SyncService) processNoteSync(serverNote *models.Note, syncInfo *models.SyncInfo) error {
+	remoteNoteID := serverNote.NoteID
 	if serverNote.IsDeleted {
 		localID, _ := s.db.GetLocalNoteID(serverNote.NoteID)
 		if localID != "" {
@@ -141,10 +194,42 @@ func (s *SyncService) processNoteSync(serverNote *models.Note, syncInfo *models.
 		}
 		return nil
 	}
+	// Notes received from the server reference notebooks by remote ID. The
+	// desktop cache keeps its own local notebook IDs, so translate before any
+	// insert/update; otherwise moved notes appear under the wrong notebook and
+	// notebook counters no longer match the local note rows.
+	if serverNote.NotebookID != "" {
+		if localNotebookID, err := s.db.GetNotebookIDByServerID(serverNote.NotebookID); err == nil && localNotebookID != "" {
+			copyNote := *serverNote
+			copyNote.NotebookID = localNotebookID
+			serverNote = &copyNote
+		}
+	}
 
 	localNote, err := s.db.GetNoteByServerID(serverNote.NoteID)
 	if err != nil {
 		return err
+	}
+	if localNote == nil {
+		// A cache written by an older client may have lost only the remote
+		// mapping. Match the identical ID before inserting another local row.
+		byLocalID, err := s.db.GetNote(serverNote.NoteID)
+		if err != nil {
+			return err
+		}
+		if byLocalID != nil && byLocalID.ServerNoteID == "" {
+			if err := s.db.SetServerNoteID(byLocalID.NoteID, serverNote.NoteID); err != nil {
+				return err
+			}
+			byLocalID.ServerNoteID = serverNote.NoteID
+			localNote = byLocalID
+		} else if byLocalID != nil {
+			// Same local ID, different remote object: preserve both notes.
+			copyNote := *serverNote
+			copyNote.ServerNoteID = serverNote.NoteID
+			copyNote.NoteID = utils.ObjectId()
+			serverNote = &copyNote
+		}
 	}
 
 	if localNote == nil {
@@ -154,17 +239,38 @@ func (s *SyncService) processNoteSync(serverNote *models.Note, syncInfo *models.
 		}
 		if created != nil {
 			syncInfo.Note.Adds = append(syncInfo.Note.Adds, created.NoteID)
-			s.syncNoteContentAndFiles(created)
+			if err := s.syncNoteContentAndFiles(created); err != nil {
+				return err
+			}
 		}
 		return nil
 	}
+	// Keep the local primary key when updating an existing cached note. The
+	// server NoteId is only the mapping key; using it in UPDATE ... WHERE
+	// note_id would silently update zero rows and leave moves/content stale.
+	serverNoteCopy := *serverNote
+	serverNoteCopy.NoteID = localNote.NoteID
+	serverNote = &serverNoteCopy
 
 	if localNote.Usn == serverNote.Usn {
+		if serverNote.NotebookID != "" && localNote.NotebookID != serverNote.NotebookID {
+			if err := s.db.SetNoteNotebook(localNote.NoteID, serverNote.NotebookID); err != nil {
+				return err
+			}
+			syncInfo.Note.Updates = append(syncInfo.Note.Updates, localNote.NoteID)
+		}
 		// Older desktop builds could erase cached content while applying a
 		// metadata-only update (for example, changing IsStar). A forced full
 		// sync must be able to repair those already-corrupted cache rows.
 		if localNote.Content == "" && localNote.ServerNoteID != "" {
-			s.syncNoteContentAndFiles(localNote)
+			if err := s.syncNoteContentAndFiles(localNote); err != nil {
+				return err
+			}
+		}
+		if localNote.LocalIsDelete {
+			if err := s.db.UpdateNoteForce(serverNote, false); err != nil {
+				return err
+			}
 		}
 		return nil
 	}
@@ -173,7 +279,7 @@ func (s *SyncService) processNoteSync(serverNote *models.Note, syncInfo *models.
 	}
 
 	if localNote.IsDirty {
-		serverContent, err := s.api.GetNoteContent(serverNote.NoteID)
+		serverContent, err := s.api.GetNoteContent(remoteNoteID)
 		if err != nil {
 			return err
 		}
@@ -198,20 +304,19 @@ func (s *SyncService) processNoteSync(serverNote *models.Note, syncInfo *models.
 
 	err = s.db.UpdateNoteForce(serverNote, true)
 	if err == nil && (serverNote.InitSync || localNote.Content == "") {
-		s.syncNoteContentAndFiles(localNote)
+		err = s.syncNoteContentAndFiles(localNote)
 	}
 	return err
 }
 
-func (s *SyncService) syncNoteContentAndFiles(note *models.Note) {
+func (s *SyncService) syncNoteContentAndFiles(note *models.Note) error {
 	if note == nil || note.ServerNoteID == "" {
-		return
+		return fmt.Errorf("cannot sync note content without a server note ID")
 	}
 
 	content, err := s.api.GetNoteContent(note.ServerNoteID)
 	if err != nil {
-		logrus.Errorf("Get note content error for %s: %v", note.NoteID, err)
-		return
+		return fmt.Errorf("get note content %s: %w", note.NoteID, err)
 	}
 
 	user, _ := s.db.GetActiveUser()
@@ -222,7 +327,7 @@ func (s *SyncService) syncNoteContentAndFiles(note *models.Note) {
 
 	s.downloadContentImages(content)
 
-	s.db.UpdateNoteContent(note.NoteID, content)
+	return s.db.UpdateNoteContent(note.NoteID, content)
 }
 
 func (s *SyncService) downloadContentImages(content string) {
@@ -369,6 +474,7 @@ func (s *SyncService) syncTags(afterUsn int64, syncInfo *models.SyncInfo) error 
 
 		if len(tags) > 0 {
 			currentUsn = tags[len(tags)-1].Usn
+			s.db.UpdateUserSyncState(s.db.GetCurrentUserID(), map[string]int64{"tag_usn": currentUsn})
 		}
 
 		if len(tags) < s.maxEntry {
@@ -376,6 +482,11 @@ func (s *SyncService) syncTags(afterUsn int64, syncInfo *models.SyncInfo) error 
 		}
 
 		time.Sleep(500 * time.Millisecond)
+	}
+	if afterUsn < 0 {
+		if err := s.db.CleanupUnusedTags(s.db.GetCurrentUserID()); err != nil {
+			return err
+		}
 	}
 
 	return nil
