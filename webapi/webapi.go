@@ -1,8 +1,10 @@
 package webapi
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/fs"
 	"log"
 	"net/http"
@@ -46,10 +48,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
 		var payload map[string]any
-		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		raw, err := io.ReadAll(r.Body)
+		if err != nil || json.Unmarshal(raw, &payload) != nil || payload == nil {
 			h.writeJSON(w, map[string]any{"Ok": false, "Msg": "invalidJSON"})
 			return
 		}
+		r.Body = io.NopCloser(bytes.NewReader(raw))
 		if r.Form == nil {
 			r.Form = make(url.Values)
 		}
@@ -88,6 +92,9 @@ func isGetApiPath(path string) bool {
 		"/api2/file/getAttach",
 		"/api2/system/version",
 		"/api2/user/getSyncState",
+		"/api2/user/info",
+		"/api2/groups",
+		"/api2/web/groups",
 		"/api2/notebook/getSyncNotebooks",
 		"/api2/note/getSyncNotes",
 		"/api2/note/getNoteContent",
@@ -186,6 +193,8 @@ func (h *Handler) route(w http.ResponseWriter, r *http.Request) bool {
 		h.pasteImage(w, r)
 	case path == "/api2/file/getImage":
 		h.serveImage(w, r)
+	case path == "/api2/file/getAttach" && method == http.MethodGet:
+		h.downloadAttach(w, r)
 	case path == "/api2/auth/session":
 		if host := h.form(r, "host"); host != "" && h.Proxy != nil {
 			h.Proxy.SetHost(host)

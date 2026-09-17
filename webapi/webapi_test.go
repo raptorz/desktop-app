@@ -433,6 +433,10 @@ func TestAttachmentRoundtrip(t *testing.T) {
 	if rec.Code != 200 || !strings.Contains(rec.Header().Get("Content-Disposition"), "attachment") {
 		t.Fatalf("download failed: %d %s", rec.Code, rec.Header().Get("Content-Disposition"))
 	}
+	code, content := e.get(t, "/api2/file/getAttach?fileId="+attachID)
+	if code != http.StatusOK || string(content) != "附件内容" {
+		t.Fatalf("normalized attachment URL failed: %d %s", code, content)
+	}
 
 	e.postJSON(t, "/api2/attach/deleteAttach", url.Values{"attachId": {attachID}}, &listResp)
 	if listResp.Ok != true {
@@ -441,6 +445,58 @@ func TestAttachmentRoundtrip(t *testing.T) {
 	e.postJSON(t, "/api2/attach/getAttachs", url.Values{"noteId": {noteID}}, &listResp)
 	if len(listResp.List) != 0 {
 		t.Fatalf("attach still listed: %v", listResp.List)
+	}
+}
+
+func TestLocalCacheRejectsOtherAccounts(t *testing.T) {
+	e := newTestEnv(t)
+	firstUser, firstNotebook := e.login(t)
+	firstNote := utils.ObjectId()
+	e.post(t, "/api2/save", url.Values{
+		"noteId": {firstNote}, "notebookId": {firstNotebook}, "title": {"private"}, "content": {"secret"}, "isNew": {"true"},
+	})
+
+	secondUser := utils.ObjectId()
+	now := time.Now()
+	if err := e.db.InsertUser(&models.User{ID: secondUser, Username: "second", Email: "second@gemsnote.test", IsActive: true, IsLocal: true, CreatedTime: &now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.db.SwitchUser(secondUser); err != nil {
+		t.Fatal(err)
+	}
+	e.db.SetCurrentUser(secondUser)
+
+	for _, path := range []string{
+		"/api2/document?noteId=" + firstNote,
+		"/api2/file/getAttach?fileId=" + firstNote,
+	} {
+		_, body := e.get(t, path)
+		if strings.Contains(string(body), "secret") {
+			t.Fatalf("cross-account read %s: %s", path, body)
+		}
+	}
+	for _, tc := range []struct {
+		path string
+		form url.Values
+	}{
+		{"/api2/save", url.Values{"noteId": {firstNote}, "title": {"stolen"}, "content": {"stolen"}}},
+		{"/api2/notebook/updateNotebookTitle", url.Values{"notebookId": {firstNotebook}, "title": {"stolen"}}},
+		{"/api2/notebook/deleteNotebook", url.Values{"notebookId": {firstNotebook}}},
+		{"/api2/note/deleteNote", url.Values{"noteIds[0]": {firstNote}}},
+		{"/api2/note/moveNote", url.Values{"noteIds[0]": {firstNote}, "notebookId": {firstNotebook}}},
+		{"/api2/noteContentHistory/listHistories", url.Values{"noteId": {firstNote}}},
+		{"/api2/attach/getAttachs", url.Values{"noteId": {firstNote}}},
+	} {
+		_, body := e.post(t, tc.path, tc.form)
+		if !strings.Contains(string(body), `"Ok":false`) {
+			t.Fatalf("cross-account write/read accepted %s: %s", tc.path, body)
+		}
+	}
+	if note, _ := e.db.GetNote(firstNote); note == nil || note.UserID != firstUser || note.Title != "private" || note.IsTrash {
+		t.Fatalf("first account note changed: %+v", note)
+	}
+	if notebook, _ := e.db.GetNotebook(firstNotebook); notebook == nil || notebook.Title != "默认笔记本" {
+		t.Fatalf("first account notebook changed: %+v", notebook)
 	}
 }
 
@@ -495,6 +551,16 @@ func TestSpaFallback(t *testing.T) {
 	code, body := e.get(t, "/api2/note/some-deep-link")
 	if code != 200 || !strings.Contains(string(body), "spa") {
 		t.Fatalf("SPA fallback failed: %d %s", code, body)
+	}
+}
+
+func TestAccountGETRoutesAreNotSPAFallbacks(t *testing.T) {
+	e := newTestEnv(t)
+	for _, path := range []string{"/api2/groups", "/api2/web/groups", "/api2/user/info"} {
+		_, body := e.get(t, path)
+		if !json.Valid(body) || strings.Contains(string(body), "spa") {
+			t.Errorf("%s returned a SPA page instead of an API response: %s", path, body)
+		}
 	}
 }
 

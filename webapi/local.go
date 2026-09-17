@@ -97,6 +97,30 @@ func (h *Handler) requireUser(w http.ResponseWriter) *models.User {
 	return user
 }
 
+func (h *Handler) ownedNote(userID, noteID string) *models.Note {
+	note, err := h.DB.GetNote(noteID)
+	if err != nil || note == nil || note.UserID != userID || note.LocalIsDelete {
+		return nil
+	}
+	return note
+}
+
+func (h *Handler) ownedNotebook(userID, notebookID string) *models.Notebook {
+	nb, err := h.DB.GetNotebook(notebookID)
+	if err != nil || nb == nil || nb.UserID != userID || nb.LocalIsDelete {
+		return nil
+	}
+	return nb
+}
+
+func (h *Handler) ownedAttach(userID, attachID string) *models.Attach {
+	attach, err := h.DB.GetAttach(attachID)
+	if err != nil || attach == nil || attach.UserID != userID {
+		return nil
+	}
+	return attach
+}
+
 func (h *Handler) sharedCacheState(user *models.User) string {
 	if user.Host == "" {
 		return ""
@@ -238,8 +262,8 @@ func (h *Handler) documentNote(n *models.Note) map[string]any {
 }
 
 func (h *Handler) respondDocument(w http.ResponseWriter, noteID, userID string) {
-	note, err := h.DB.GetNote(noteID)
-	if err != nil || note == nil {
+	note := h.ownedNote(userID, noteID)
+	if note == nil {
 		h.fail(w, "notExists")
 		return
 	}
@@ -365,6 +389,9 @@ func (h *Handler) sortedNotes(user *models.User, notebookID, key, tag, sortField
 	case tag != "":
 		list, err = h.DB.SearchNotesByTag(user.ID, tag)
 	case notebookID != "":
+		if h.ownedNotebook(user.ID, notebookID) == nil {
+			return nil, fmt.Errorf("noAuth")
+		}
 		list, err = h.DB.GetNotes(notebookID)
 	default:
 		list, err = h.DB.GetAllNotes(user.ID)
@@ -372,6 +399,13 @@ func (h *Handler) sortedNotes(user *models.User, notebookID, key, tag, sortField
 	if err != nil {
 		return nil, err
 	}
+	visible := list[:0]
+	for _, note := range list {
+		if note != nil && note.UserID == user.ID {
+			visible = append(visible, note)
+		}
+	}
+	list = visible
 
 	switch sortField {
 	case "Title":
@@ -444,8 +478,12 @@ func (h *Handler) save(w http.ResponseWriter, r *http.Request) {
 	notebookID := h.form(r, "notebookId")
 
 	if isNew {
-		if notebookID == "" {
+		if h.ownedNotebook(user.ID, notebookID) == nil {
 			h.fail(w, "invalidNotebook")
+			return
+		}
+		if ownerID := h.form(r, "ownerId"); ownerID != "" && ownerID != user.ID {
+			h.fail(w, "noAuth")
 			return
 		}
 		if existing, _ := h.DB.GetNote(noteID); existing != nil {
@@ -453,15 +491,11 @@ func (h *Handler) save(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		now := time.Now()
-		ownerID := h.form(r, "ownerId")
-		if ownerID == "" {
-			ownerID = user.ID
-		}
 		note := &models.Note{
 			ID:          utils.ObjectId(),
 			NoteID:      noteID,
 			NotebookID:  notebookID,
-			UserID:      ownerID,
+			UserID:      user.ID,
 			Title:       title,
 			Content:     content,
 			Desc:        excerpt(content, 150),
@@ -482,8 +516,8 @@ func (h *Handler) save(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	note, err := h.DB.GetNote(noteID)
-	if err != nil || note == nil || note.IsTrash {
+	note := h.ownedNote(user.ID, noteID)
+	if note == nil || note.IsTrash {
 		h.fail(w, "notExists")
 		return
 	}
@@ -525,8 +559,8 @@ func (h *Handler) restore(w http.ResponseWriter, r *http.Request) {
 	if user == nil {
 		return
 	}
-	note, err := h.DB.GetNote(h.form(r, "noteId"))
-	if err != nil || note == nil || !note.IsTrash {
+	note := h.ownedNote(user.ID, h.form(r, "noteId"))
+	if note == nil || !note.IsTrash {
 		h.fail(w, "notExists")
 		return
 	}
@@ -550,11 +584,14 @@ func (h *Handler) addNotebook(w http.ResponseWriter, r *http.Request) {
 	}
 	parentNotebookID := h.form(r, "parentNotebookId")
 	if parentNotebookID != "" {
-		parent, err := h.DB.GetNotebook(parentNotebookID)
-		if err != nil || parent == nil || parent.UserID != user.ID || parent.LocalIsDelete {
+		if h.ownedNotebook(user.ID, parentNotebookID) == nil {
 			h.fail(w, "invalidParentNotebook")
 			return
 		}
+	}
+	if existing, _ := h.DB.GetNotebook(h.form(r, "notebookId")); existing != nil {
+		h.fail(w, "conflict")
+		return
 	}
 	now := time.Now()
 	nb := &models.Notebook{
@@ -580,8 +617,8 @@ func (h *Handler) renameNotebook(w http.ResponseWriter, r *http.Request) {
 	if user == nil {
 		return
 	}
-	nb, err := h.DB.GetNotebook(h.form(r, "notebookId"))
-	if err != nil || nb == nil {
+	nb := h.ownedNotebook(user.ID, h.form(r, "notebookId"))
+	if nb == nil {
 		h.fail(w, "notExists")
 		return
 	}
@@ -600,6 +637,10 @@ func (h *Handler) deleteNotebook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	notebookID := h.form(r, "notebookId")
+	if h.ownedNotebook(user.ID, notebookID) == nil {
+		h.fail(w, "notExists")
+		return
+	}
 	if has, _ := h.DB.HasNotes(notebookID); has {
 		h.fail(w, "notebookHasNotes")
 		return
@@ -616,11 +657,20 @@ func (h *Handler) deleteNote(w http.ResponseWriter, r *http.Request) {
 	if user == nil {
 		return
 	}
-	for _, noteID := range formList(r, "noteIds") {
-		if note, err := h.DB.GetNote(noteID); err == nil && note != nil {
-			h.DB.SetNoteTrash(noteID, true)
-			h.recountNotebook(note.NotebookID)
+	ids := formList(r, "noteIds")
+	for _, noteID := range ids {
+		if h.ownedNote(user.ID, noteID) == nil {
+			h.fail(w, "noAuth")
+			return
 		}
+	}
+	for _, noteID := range ids {
+		note := h.ownedNote(user.ID, noteID)
+		if err := h.DB.SetNoteTrash(noteID, true); err != nil {
+			h.fail(w, err.Error())
+			return
+		}
+		h.recountNotebook(note.NotebookID)
 	}
 	h.writeJSON(w, true)
 }
@@ -631,12 +681,18 @@ func (h *Handler) deleteTrashNote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	noteID := h.form(r, "noteId")
-	if note, err := h.DB.GetNote(noteID); err == nil && note != nil {
-		h.DB.MarkNoteLocalDelete(noteID)
-		h.Files.DeleteNoteFiles(noteID)
-		h.DB.DeleteNoteHistories(noteID)
-		h.recountNotebook(note.NotebookID)
+	note := h.ownedNote(user.ID, noteID)
+	if note == nil {
+		h.fail(w, "noAuth")
+		return
 	}
+	if err := h.DB.MarkNoteLocalDelete(noteID); err != nil {
+		h.fail(w, err.Error())
+		return
+	}
+	h.Files.DeleteNoteFiles(noteID)
+	h.DB.DeleteNoteHistories(noteID)
+	h.recountNotebook(note.NotebookID)
 	h.writeJSON(w, true)
 }
 
@@ -645,15 +701,27 @@ func (h *Handler) moveNote(w http.ResponseWriter, r *http.Request) {
 	if user == nil {
 		return
 	}
-	for _, noteID := range formList(r, "noteIds") {
-		note, err := h.DB.GetNote(noteID)
-		if err != nil || note == nil {
-			continue
+	targetID := h.form(r, "notebookId")
+	if h.ownedNotebook(user.ID, targetID) == nil {
+		h.fail(w, "invalidNotebook")
+		return
+	}
+	ids := formList(r, "noteIds")
+	for _, noteID := range ids {
+		if h.ownedNote(user.ID, noteID) == nil {
+			h.fail(w, "noAuth")
+			return
 		}
+	}
+	for _, noteID := range ids {
+		note := h.ownedNote(user.ID, noteID)
 		oldNotebookID := note.NotebookID
-		h.DB.MoveNote(noteID, h.form(r, "notebookId"))
+		if err := h.DB.MoveNote(noteID, targetID); err != nil {
+			h.fail(w, err.Error())
+			return
+		}
 		h.recountNotebook(oldNotebookID)
-		h.recountNotebook(h.form(r, "notebookId"))
+		h.recountNotebook(targetID)
 	}
 	h.writeJSON(w, true)
 }
@@ -669,11 +737,23 @@ func (h *Handler) copyNote(w http.ResponseWriter, r *http.Request) {
 	if user == nil {
 		return
 	}
+	targetID := h.form(r, "notebookId")
+	if h.ownedNotebook(user.ID, targetID) == nil {
+		h.fail(w, "invalidNotebook")
+		return
+	}
+	ids := formList(r, "noteIds")
+	for _, noteID := range ids {
+		if h.ownedNote(user.ID, noteID) == nil {
+			h.fail(w, "noAuth")
+			return
+		}
+	}
 	copied := []string{}
-	for _, noteID := range formList(r, "noteIds") {
-		if note, err := h.DB.CopyNote(noteID, h.form(r, "notebookId")); err == nil && note != nil {
+	for _, noteID := range ids {
+		if note, err := h.DB.CopyNote(noteID, targetID); err == nil && note != nil {
 			copied = append(copied, note.NoteID)
-			h.recountNotebook(h.form(r, "notebookId"))
+			h.recountNotebook(targetID)
 		}
 	}
 	h.writeJSON(w, map[string]any{"Ok": true, "Item": copied})
@@ -684,16 +764,23 @@ func (h *Handler) listHistories(w http.ResponseWriter, r *http.Request) {
 	if user == nil {
 		return
 	}
+	localNoteID := h.form(r, "noteId")
 	if user.Host != "" {
-		localNoteID := h.form(r, "noteId")
 		accountID := db.SharedAccountID(user.Host, user.ID)
 		if h.DB.IsSharedNote(accountID, localNoteID) {
 			h.fail(w, "sharedHistoryUnsupported")
 			return
 		}
+	}
+	note := h.ownedNote(user.ID, localNoteID)
+	if note == nil {
+		h.fail(w, "noAuth")
+		return
+	}
+	if user.Host != "" {
 		if h.Proxy != nil {
 			remoteNoteID := localNoteID
-			if note, err := h.DB.GetNote(localNoteID); err == nil && note != nil && note.ServerNoteID != "" {
+			if note.ServerNoteID != "" {
 				remoteNoteID = note.ServerNoteID
 			}
 			if histories, ok := h.Proxy.fetchHistories(remoteNoteID); ok {
@@ -757,13 +844,19 @@ func (h *Handler) getAttachs(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if h.ownedNote(user.ID, h.form(r, "noteId")) == nil {
+		h.fail(w, "noAuth")
+		return
+	}
 	attachs, err := h.Files.GetAttachsByNote(h.form(r, "noteId"))
 	if err != nil {
 		attachs = nil
 	}
 	list := []map[string]any{}
 	for _, a := range attachs {
-		list = append(list, h.attachItem(a))
+		if a != nil && a.UserID == user.ID {
+			list = append(list, h.attachItem(a))
+		}
 	}
 	h.writeJSON(w, map[string]any{"Ok": true, "List": list})
 }
@@ -825,6 +918,9 @@ func (h *Handler) storeUpload(fh *multipart.FileHeader, noteID string) (*models.
 	if err != nil || user == nil {
 		return nil, fmt.Errorf("no active user")
 	}
+	if h.ownedNote(user.ID, noteID) == nil {
+		return nil, fmt.Errorf("noAuth")
+	}
 	src, err := fh.Open()
 	if err != nil {
 		return nil, err
@@ -872,7 +968,12 @@ func (h *Handler) deleteAttach(w http.ResponseWriter, r *http.Request) {
 	if user == nil {
 		return
 	}
-	if err := h.Files.DeleteAttach(h.form(r, "attachId")); err != nil {
+	attachID := h.form(r, "attachId")
+	if h.ownedAttach(user.ID, attachID) == nil {
+		h.fail(w, "noAuth")
+		return
+	}
+	if err := h.Files.DeleteAttach(attachID); err != nil {
 		h.fail(w, err.Error())
 		return
 	}
@@ -886,15 +987,22 @@ func (h *Handler) downloadAttach(w http.ResponseWriter, r *http.Request) {
 	}
 	var path, title string
 	attachID := h.form(r, "attachId")
+	if attachID == "" {
+		attachID = h.form(r, "fileId")
+	}
 	if user.Host != "" {
 		accountID := db.SharedAccountID(user.Host, user.ID)
 		if h.DB.IsSharedFile(accountID, attachID) {
 			path, title, _, _ = h.DB.GetSharedFilePath(accountID, attachID, "attachment")
 		} else {
-			path, title, _ = h.Files.GetAttach(attachID)
+			if h.ownedAttach(user.ID, attachID) != nil {
+				path, title, _ = h.Files.GetAttach(attachID)
+			}
 		}
 	} else {
-		path, title, _ = h.Files.GetAttach(attachID)
+		if h.ownedAttach(user.ID, attachID) != nil {
+			path, title, _ = h.Files.GetAttach(attachID)
+		}
 	}
 	if path == "" {
 		http.NotFound(w, r)
@@ -907,6 +1015,10 @@ func (h *Handler) downloadAttach(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) pasteImage(w http.ResponseWriter, r *http.Request) {
 	user := h.requireUser(w)
 	if user == nil {
+		return
+	}
+	if noteID := h.form(r, "noteId"); noteID != "" && h.ownedNote(user.ID, noteID) == nil {
+		h.fail(w, "noAuth")
 		return
 	}
 	_, fh, err := r.FormFile("file")
@@ -940,16 +1052,22 @@ func (h *Handler) serveImage(w http.ResponseWriter, r *http.Request) {
 		if h.DB.IsSharedFile(accountID, fileID) {
 			path, _, _, _ = h.DB.GetSharedFilePath(accountID, fileID, "image")
 		} else {
-			path, _ = h.Files.GetImage(fileID)
+			if img, _ := h.DB.GetImage(fileID); img != nil && img.UserID == user.ID {
+				path, _ = h.Files.GetImage(fileID)
+			}
 		}
 	} else {
-		path, _ = h.Files.GetImage(fileID)
+		if img, _ := h.DB.GetImage(fileID); img != nil && img.UserID == user.ID {
+			path, _ = h.Files.GetImage(fileID)
+		}
 	}
 	if path == "" {
 		http.NotFound(w, r)
 		return
 	}
-	w.Header().Set("Cache-Control", "public, max-age=31536000")
+	// These files are account-scoped; a shared browser cache must not serve an
+	// earlier account's image after the active user changes.
+	w.Header().Set("Cache-Control", "private, no-store")
 	http.ServeFile(w, r, path)
 }
 

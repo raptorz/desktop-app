@@ -25,13 +25,14 @@ type ServerProxy struct {
 	DB    *db.Database
 	Files *service.FileService
 
-	client        *http.Client
-	email         string
-	pwd           string
-	sessionOk     bool
-	token         string
-	remoteUser    *models.User
-	versionNotice string
+	client           *http.Client
+	email            string
+	pwd              string
+	sessionOk        bool
+	browserSessionOk bool
+	token            string
+	remoteUser       *models.User
+	versionNotice    string
 }
 
 func NewServerProxy(database *db.Database, files *service.FileService) *ServerProxy {
@@ -60,6 +61,7 @@ func (p *ServerProxy) SetHost(host string) {
 	}
 	p.DB.SetConfig("host", strings.TrimRight(host, "/"))
 	p.sessionOk = false
+	p.browserSessionOk = false
 	p.token = ""
 	p.remoteUser = nil
 }
@@ -68,11 +70,12 @@ func (p *ServerProxy) configured() bool {
 	return p.host() != ""
 }
 
-func (p *ServerProxy) call(method, path string, form url.Values, file *multipart.FileHeader) ([]byte, string, error) {
+func (p *ServerProxy) call(method, path string, form url.Values, file *multipart.FileHeader) ([]byte, string, int, error) {
 	req, err := http.NewRequest(method, p.host()+path, nil)
 	if err != nil {
-		return nil, "", err
+		return nil, "", 0, err
 	}
+	req.Header.Set("X-Requested-With", "XMLHttpRequest")
 	if p.token != "" {
 		q := req.URL.Query()
 		q.Set("token", p.token)
@@ -90,16 +93,16 @@ func (p *ServerProxy) call(method, path string, form url.Values, file *multipart
 		}
 		src, err := file.Open()
 		if err != nil {
-			return nil, "", err
+			return nil, "", 0, err
 		}
 		part, err := writer.CreateFormFile("file", filepath.Base(file.Filename))
 		if err != nil {
 			src.Close()
-			return nil, "", err
+			return nil, "", 0, err
 		}
 		if _, err := io.Copy(part, src); err != nil {
 			src.Close()
-			return nil, "", err
+			return nil, "", 0, err
 		}
 		src.Close()
 		writer.Close()
@@ -122,22 +125,23 @@ func (p *ServerProxy) call(method, path string, form url.Values, file *multipart
 
 	resp, err := p.client.Do(req)
 	if err != nil {
-		return nil, "", err
+		return nil, "", 0, err
 	}
 	defer resp.Body.Close()
 	data, err := io.ReadAll(resp.Body)
-	return data, resp.Header.Get("Content-Type"), err
+	return data, resp.Header.Get("Content-Type"), resp.StatusCode, err
 }
 
-func (p *ServerProxy) callJSON(method, path string, payload any) ([]byte, string, error) {
+func (p *ServerProxy) callJSON(method, path string, payload any) ([]byte, string, int, error) {
 	body, err := json.Marshal(payload)
 	if err != nil {
-		return nil, "", err
+		return nil, "", 0, err
 	}
 	req, err := http.NewRequest(method, p.host()+path, bytes.NewReader(body))
 	if err != nil {
-		return nil, "", err
+		return nil, "", 0, err
 	}
+	req.Header.Set("X-Requested-With", "XMLHttpRequest")
 	if p.token != "" {
 		q := req.URL.Query()
 		q.Set("token", p.token)
@@ -146,11 +150,11 @@ func (p *ServerProxy) callJSON(method, path string, payload any) ([]byte, string
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := p.client.Do(req)
 	if err != nil {
-		return nil, "", err
+		return nil, "", 0, err
 	}
 	defer resp.Body.Close()
 	data, err := io.ReadAll(resp.Body)
-	return data, resp.Header.Get("Content-Type"), err
+	return data, resp.Header.Get("Content-Type"), resp.StatusCode, err
 }
 
 func parseRe(data []byte) (ok bool, msg string, parsed bool) {
@@ -188,7 +192,7 @@ func (p *ServerProxy) LoginServer(email, pwd string) (bool, string) {
 	if !p.configured() {
 		return false, "offline"
 	}
-	data, _, err := p.callJSON(http.MethodPost, "/api2/auth/login", map[string]string{"email": email, "pwd": pwd})
+	data, _, _, err := p.callJSON(http.MethodPost, "/api2/auth/login", map[string]string{"email": email, "pwd": pwd})
 	if err != nil {
 		return false, "offline"
 	}
@@ -207,6 +211,7 @@ func (p *ServerProxy) LoginServer(email, pwd string) (bool, string) {
 	}
 	_ = json.Unmarshal(data, &auth)
 	p.email, p.pwd, p.token, p.sessionOk = email, pwd, auth.Token, true
+	p.browserSessionOk = false
 	if auth.UserID != "" {
 		p.remoteUser = &models.User{ID: auth.UserID, Username: auth.Username, Email: auth.Email, IsActive: true}
 	}
@@ -244,7 +249,7 @@ func (p *ServerProxy) fetchHistories(noteID string) ([]map[string]any, bool) {
 	if !p.configured() || !p.ensureSession() {
 		return nil, false
 	}
-	data, _, err := p.call(http.MethodGet, "/api2/note/getHistories", url.Values{"noteId": {noteID}}, nil)
+	data, _, _, err := p.call(http.MethodGet, "/api2/note/getHistories", url.Values{"noteId": {noteID}}, nil)
 	if err != nil {
 		return nil, false
 	}
@@ -265,7 +270,7 @@ func (p *ServerProxy) fetchHistories(noteID string) ([]map[string]any, bool) {
 			// Old Leanote/Gemsnote responses only have an array index.
 			contentParams.Set("index", strconv.Itoa(meta.Index))
 		}
-		contentData, _, err := p.call(http.MethodGet, "/api2/note/getHistoryContent", contentParams, nil)
+		contentData, _, _, err := p.call(http.MethodGet, "/api2/note/getHistoryContent", contentParams, nil)
 		if err != nil {
 			return nil, false
 		}
@@ -289,7 +294,7 @@ func (p *ServerProxy) FetchAPIToken(email, pwd string) string {
 	if !p.configured() {
 		return ""
 	}
-	data, _, err := p.callJSON(http.MethodPost, "/api2/auth/login", map[string]string{"email": email, "pwd": pwd})
+	data, _, _, err := p.callJSON(http.MethodPost, "/api2/auth/login", map[string]string{"email": email, "pwd": pwd})
 	if err != nil {
 		return ""
 	}
@@ -309,7 +314,7 @@ func (p *ServerProxy) fetchServerUser() *models.User {
 	if !p.ensureSession() {
 		return nil
 	}
-	data, _, err := p.call(http.MethodGet, "/api2/user/info", nil, nil)
+	data, _, _, err := p.call(http.MethodGet, "/api2/user/info", nil, nil)
 	if err != nil {
 		return nil
 	}
@@ -411,6 +416,25 @@ func (p *ServerProxy) ensureSession() bool {
 	return ok
 }
 
+func (p *ServerProxy) ensureBrowserSessionStatus() (bool, string) {
+	if ok, msg := p.ensureSessionStatus(); !ok {
+		return false, msg
+	}
+	if p.browserSessionOk {
+		return true, ""
+	}
+	data, _, _, err := p.callJSON(http.MethodPost, "/api2/auth/session", map[string]string{"email": p.email, "pwd": p.pwd})
+	if err != nil {
+		return false, "offline"
+	}
+	ok, msg, parsed := parseRe(data)
+	if !parsed {
+		return false, "serverError"
+	}
+	p.browserSessionOk = ok
+	return ok, msg
+}
+
 func (p *ServerProxy) ensureSessionStatus() (bool, string) {
 	if p.sessionOk {
 		return true, ""
@@ -439,7 +463,7 @@ func (p *ServerProxy) GuestConfig() (openRegister, needCaptcha bool) {
 	if !p.configured() {
 		return false, false
 	}
-	data, _, err := p.call(http.MethodGet, "/api2/web/bootstrap", nil, nil)
+	data, _, _, err := p.call(http.MethodGet, "/api2/web/bootstrap", nil, nil)
 	if err != nil {
 		return false, false
 	}
@@ -458,13 +482,13 @@ func (p *ServerProxy) SharedNotebooks(user *models.User) (map[string]any, bool) 
 	if !p.configured() {
 		return empty, false
 	}
-	if !p.ensureSession() {
+	if ok, _ := p.ensureBrowserSessionStatus(); !ok {
 		return empty, false
 	}
 	shared, isAdmin, ok := p.fetchBootstrapSession()
 	if !ok {
-		p.sessionOk = false
-		if p.ensureSession() {
+		p.browserSessionOk = false
+		if sessionReady, _ := p.ensureBrowserSessionStatus(); sessionReady {
 			shared, isAdmin, ok = p.fetchBootstrapSession()
 		}
 	}
@@ -478,7 +502,7 @@ func (p *ServerProxy) SharedNotebooks(user *models.User) (map[string]any, bool) 
 }
 
 func (p *ServerProxy) fetchBootstrapSession() (map[string]any, bool, bool) {
-	data, _, err := p.call(http.MethodGet, "/api2/web/bootstrap", nil, nil)
+	data, _, _, err := p.call(http.MethodGet, "/api2/web/bootstrap", nil, nil)
 	if err != nil {
 		return nil, false, false
 	}
@@ -506,6 +530,7 @@ func (p *ServerProxy) Logout() {
 	jar, _ := cookiejar.New(nil)
 	p.client.Jar = jar
 	p.sessionOk = false
+	p.browserSessionOk = false
 	p.token = ""
 	p.remoteUser = nil
 	// Credentials are only a session aid for reconnecting while logged in.
@@ -520,30 +545,59 @@ func (p *ServerProxy) Forward(w http.ResponseWriter, r *http.Request, form url.V
 	if !p.configured() {
 		return false
 	}
-	var data []byte
-	var contentType string
-	var err error
-	if file == nil && strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") && form != nil {
-		payload := make(map[string]string, len(form))
-		for key, values := range form {
-			if len(values) > 0 {
-				payload[key] = values[0]
-			}
+	var rawJSON json.RawMessage
+	if file == nil && strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
+		var err error
+		rawJSON, err = io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, `{"Ok":false,"Msg":"invalidJSON"}`, http.StatusBadRequest)
+			return true
 		}
-		data, contentType, err = p.callJSON(r.Method, r.URL.RequestURI(), payload)
-	} else {
-		data, contentType, err = p.call(r.Method, r.URL.RequestURI(), form, file)
 	}
+	send := func() ([]byte, string, int, error) {
+		if rawJSON != nil {
+			return p.callJSON(r.Method, r.URL.RequestURI(), rawJSON)
+		}
+		return p.call(r.Method, r.URL.RequestURI(), form, file)
+	}
+	data, contentType, status, err := send()
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusBadGateway)
 		w.Write([]byte(`{"Ok":false,"Msg":"offline"}`))
 		return true
+	}
+	if needsBrowserSession(r.URL.Path) && isNotLogin(data) {
+		p.browserSessionOk = false
+		if ok, msg := p.ensureBrowserSessionStatus(); !ok {
+			if msg == "" {
+				msg = "NOTLOGIN"
+			}
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(map[string]any{"Ok": false, "Msg": msg})
+			return true
+		}
+		data, contentType, status, err = send()
+		if err != nil {
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.WriteHeader(http.StatusBadGateway)
+			w.Write([]byte(`{"Ok":false,"Msg":"offline"}`))
+			return true
+		}
 	}
 	if contentType != "" {
 		w.Header().Set("Content-Type", contentType)
 	}
+	if status > 0 {
+		w.WriteHeader(status)
+	}
 	w.Write(data)
 	return true
+}
+
+func needsBrowserSession(path string) bool {
+	return path == "/api2/groups" || path == "/api2/web/groups" || path == "/api2/admin/data" || path == "/api2/avatar" || path == "/api2/file/uploadAvatar" || path == "/api2/user/updateUsername" || path == "/api2/user/updatePwd" || path == "/api2/user/reSendActiveEmail" || strings.HasPrefix(path, "/api2/member/") || strings.HasPrefix(path, "/api2/share/") || strings.HasPrefix(path, "/api2/web/")
 }
 
 var guestPaths = []string{"/captcha/", "/api2/auth/register", "/api2/auth/password/request", "/api2/auth/password/reset", "/api2/web/verifyEmail"}
@@ -604,6 +658,15 @@ func (h *Handler) routeProxied(w http.ResponseWriter, r *http.Request) bool {
 		h.writeJSON(w, map[string]any{"Ok": false, "Msg": msg})
 		return true
 	}
+	if needsBrowserSession(path) {
+		if ok, msg := proxy.ensureBrowserSessionStatus(); !ok {
+			if msg == "" {
+				msg = "NOTLOGIN"
+			}
+			h.writeJSON(w, map[string]any{"Ok": false, "Msg": msg})
+			return true
+		}
+	}
 	return proxy.Forward(w, r, r.Form, nil)
 }
 
@@ -614,14 +677,33 @@ func (h *Handler) proxyUpdatePwd(w http.ResponseWriter, r *http.Request) bool {
 		return true
 	}
 	newPwd := r.FormValue("pwd")
-	if !h.Proxy.Forward(w, r, r.Form, nil) {
+	if ok, msg := h.Proxy.ensureBrowserSessionStatus(); !ok {
+		h.fail(w, msg)
 		return true
 	}
-	if newPwd != "" {
-		h.DB.UpdateUserPwd(user.ID, utils.MD5WithSalt(newPwd, user.ID))
-		h.DB.SetConfig("proxy:pwd", newPwd)
-		h.Proxy.pwd = newPwd
+	data, _, status, err := h.Proxy.call(r.Method, r.URL.RequestURI(), r.Form, nil)
+	if err != nil {
+		h.fail(w, "offline")
+		return true
 	}
+	ok, msg, parsed := parseRe(data)
+	if status < 200 || status >= 300 || !parsed || !ok {
+		if msg == "" {
+			msg = "updatePwdFailed"
+		}
+		h.fail(w, msg)
+		return true
+	}
+	if err := h.DB.UpdateUserPwd(user.ID, utils.MD5WithSalt(newPwd, user.ID)); err != nil {
+		h.fail(w, err.Error())
+		return true
+	}
+	h.DB.SetConfig("proxy:pwd", newPwd)
+	h.Proxy.pwd = newPwd
+	h.Proxy.sessionOk = false
+	h.Proxy.browserSessionOk = false
+	h.Proxy.token = ""
+	h.ok(w)
 	return true
 }
 
@@ -631,20 +713,44 @@ func (h *Handler) proxyAvatar(w http.ResponseWriter, r *http.Request, fh *multip
 		h.writeJSON(w, map[string]any{"Ok": false, "Msg": "NOTLOGIN"})
 		return true
 	}
-	if !h.Proxy.Forward(w, r, r.Form, fh) {
+	if ok, msg := h.Proxy.ensureBrowserSessionStatus(); !ok {
+		if msg == "" {
+			msg = "NOTLOGIN"
+		}
+		h.writeJSON(w, map[string]any{"Ok": false, "Msg": msg})
+		return true
+	}
+	response, _, _, err := h.Proxy.call(r.Method, r.URL.RequestURI(), r.Form, fh)
+	if err != nil {
+		h.fail(w, "offline")
+		return true
+	}
+	ok, msg, parsed := parseRe(response)
+	if !parsed {
+		h.fail(w, "serverError")
+		return true
+	}
+	if !ok {
+		h.fail(w, msg)
 		return true
 	}
 	tmp, err := saveMultipartFile(fh, os.TempDir())
 	if err != nil {
+		h.fail(w, err.Error())
 		return true
 	}
 	defer os.Remove(tmp)
-	if result, err := h.Files.CopyFile(tmp, true); err == nil {
-		fileID, _ := result["FileId"].(string)
-		if fileID == "" {
-			fileID, _ = result["Id"].(string)
-		}
-		h.DB.SetConfig("logo:"+user.ID, "/api2/file/getImage?fileId="+fileID)
+	result, err := h.Files.CopyFile(tmp, true)
+	if err != nil {
+		h.fail(w, err.Error())
+		return true
 	}
+	fileID, _ := result["FileId"].(string)
+	if fileID == "" {
+		h.fail(w, "avatarCacheFailed")
+		return true
+	}
+	h.DB.SetConfig("logo:"+user.ID, "/api2/file/getImage?fileId="+fileID)
+	h.writeJSON(w, map[string]any{"Ok": true, "Id": fileID})
 	return true
 }
