@@ -9,6 +9,7 @@
 /build/bin/
 /build/appimage/
 /release/
+/tmp
 
 node_modules
 .omo
