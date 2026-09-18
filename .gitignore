@@ -3,7 +3,10 @@
 .project
 
 # Wails build artifacts
-/leanote
+/gemsnote
+.env
+.env.*
+*.log
 /frontend/dist/
 /frontend/wailsjs/
 /build/bin/
